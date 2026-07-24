@@ -70,7 +70,8 @@ export interface Requirement {
   description: string;
   priority: 'low' | 'medium' | 'high' | 'critical';
   status: 'pending' | 'in_progress' | 'testing' | 'completed' | 'rejected';
-  equipment_id: number;
+  project_id?: number;
+  equipment_id?: number;
   created_at: string;
   updated_at: string;
   equipment?: Equipment;
@@ -165,6 +166,7 @@ export interface CreateRequirementRequest {
   title: string;
   description?: string;
   priority?: string;
+  project_id?: number;
   equipment_id?: number;
 }
 
@@ -180,4 +182,124 @@ export interface AIWeeklyReportRequest {
   projects?: Project[];
   requirements?: Requirement[];
   tasks?: Task[];
+}
+
+export interface User {
+  id: number;
+  username: string;
+  display_name: string;
+  email: string;
+  role: string;
+  department: string;
+  team: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SystemSetting {
+  id: number;
+  key: string;
+  value: string;
+  description: string;
+  category: string;
+  updated_at: string;
+}
+
+export interface AISettings {
+  openai_api_key: string;
+  openai_api_base: string;
+  ai_model: string;
+}
+
+export interface NotesSettings {
+  notes_server_url: string;
+  notes_user: string;
+  notes_password: string;
+}
+
+export interface WorkCategory {
+  id: number;
+  name: string;
+  code: string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  sort_order?: number;
+  created_at?: string;
+}
+
+export interface WorkItem {
+  id: number;
+  category_id?: number;
+  title: string;
+  details?: string;
+  urgency: 'na' | 'low' | 'medium' | 'high';
+  importance: 'na' | 'low' | 'medium' | 'high';
+  status: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  priority_score: number;
+  due_date?: string;
+  project_id?: number;
+  source_type: string;
+  source_url?: string;
+  ai_notes?: string;
+  created_at?: string;
+  updated_at?: string;
+  category?: WorkCategory;
+}
+
+export interface DailyPlan {
+  id: number;
+  plan_date: string;
+  user_id?: number;
+  items_order?: string;
+  ai_suggestions?: string;
+  summary?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface WorkLog {
+  id: number;
+  work_item_id: number;
+  action: string;
+  description?: string;
+  created_at?: string;
+}
+
+export interface WorkStats {
+  total: number;
+  pending: number;
+  in_progress: number;
+  completed: number;
+  blocked: number;
+  urgent_count: number;
+  important_count: number;
+  categories: {
+    id: number;
+    name: string;
+    code: string;
+    icon?: string;
+    color?: string;
+    count: number;
+  }[];
+}
+
+export interface ImportTableRequest {
+  table_text: string;
+  project_id?: number;
+}
+
+export interface CreateWorkItemRequest {
+  category_id?: number;
+  title: string;
+  details?: string;
+  urgency?: 'na' | 'low' | 'medium' | 'high';
+  importance?: 'na' | 'low' | 'medium' | 'high';
+  status?: 'pending' | 'in_progress' | 'completed' | 'blocked';
+  due_date?: string;
+  project_id?: number;
+  source_type?: string;
+  source_url?: string;
+  ai_notes?: string;
 }

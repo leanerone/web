@@ -10,6 +10,7 @@ class RequirementBase(BaseModel):
 
 
 class RequirementCreate(RequirementBase):
+    project_id: Optional[int] = None
     equipment_id: Optional[int] = None
 
 
@@ -18,12 +19,14 @@ class RequirementUpdate(BaseModel):
     description: Optional[str] = None
     priority: Optional[str] = None
     status: Optional[str] = None
+    project_id: Optional[int] = None
     equipment_id: Optional[int] = None
 
 
 class RequirementResponse(RequirementBase):
     id: int
     status: str
+    project_id: Optional[int] = None
     equipment_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None

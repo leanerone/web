@@ -149,14 +149,23 @@ export default function Header({ title, subtitle }: HeaderProps) {
           {showSettings && (
             <div className="absolute right-0 top-10 w-48 bg-white rounded-xl shadow-xl border border-gray-200 z-50">
               <div className="py-2">
-                <button className="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowSettings(false); navigate('/profile'); }}
+                  className="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center gap-2"
+                >
                   <FileDown className="w-4 h-4" />
                   导入HCL Notes文档
                 </button>
-                <button className="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowSettings(false); navigate('/settings'); }}
+                  className="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
                   系统设置
                 </button>
-                <button className="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowSettings(false); navigate('/users'); }}
+                  className="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
                   用户管理
                 </button>
                 <div className="border-t border-gray-200 my-2" />

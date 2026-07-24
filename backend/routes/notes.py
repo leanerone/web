@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Body
 from sqlalchemy.orm import Session
 from database.session import get_db
-from services.notes_service import sync_notes, import_document, get_documents, get_document
-from schemas.notes import NotesImportRequest, NotesDocumentResponse
+from services.notes_service import sync_notes, import_document, get_documents, get_document, parse_notes_url, import_by_url
+from schemas.notes import NotesImportRequest, NotesDocumentResponse, NotesUrlImportRequest
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
@@ -31,3 +31,15 @@ def get_document_detail(document_id: int, db: Session = Depends(get_db)):
     if not doc:
         return {"success": False, "message": "文档不存在"}
     return {"success": True, "data": NotesDocumentResponse.model_validate(doc)}
+
+
+@router.post("/parse-url")
+def parse_notes_url_api(request: dict):
+    parsed = parse_notes_url(request.get('url', ''))
+    return {"success": True, "data": parsed}
+
+
+@router.post("/import-by-url")
+def import_by_url_api(request: NotesUrlImportRequest, db: Session = Depends(get_db)):
+    docs = import_by_url(db, request.url, request.project_id)
+    return {"success": True, "data": [NotesDocumentResponse.model_validate(d) for d in docs]}

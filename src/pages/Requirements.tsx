@@ -21,27 +21,11 @@ import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
 import { useNavigate } from 'react-router-dom';
-import { requirementAPI, equipmentAPI } from '@/services/api';
+import { requirementAPI, equipmentAPI, projectAPI } from '@/services/api';
 import useAppStore from '@/stores/appStore';
 import type { Requirement, Equipment, CreateRequirementRequest } from '@/types';
 
-const mockRequirements: Requirement[] = [
-  { id: 1, title: 'Lot Tracking功能增强', description: '增加Lot实时追踪功能，支持跨机台追踪，提供实时位置和状态信息。需要修改EAP驱动代码，新增追踪模块，并更新机台配置文件。', priority: 'high', status: 'pending', equipment_id: 1, created_at: '2026-07-10', updated_at: '2026-07-10' },
-  { id: 2, title: 'EPI机台参数调整', description: '调整EPI机台工艺参数配置，优化沉积效果，提高薄膜均匀性。涉及config文件修改和驱动参数调优。', priority: 'medium', status: 'in_progress', equipment_id: 2, created_at: '2026-07-08', updated_at: '2026-07-12' },
-  { id: 3, title: 'WAT数据采集优化', description: '优化WAT测试数据采集效率，减少数据传输延迟。需要重构数据采集模块并优化Oracle数据库查询。', priority: 'high', status: 'pending', equipment_id: 3, created_at: '2026-07-11', updated_at: '2026-07-11' },
-  { id: 4, title: 'CMP设备驱动更新', description: '更新CMP设备驱动至v2.0版本，修复已知bug，提升设备稳定性。涉及驱动代码重构和配置兼容性测试。', priority: 'critical', status: 'in_progress', equipment_id: 4, created_at: '2026-07-05', updated_at: '2026-07-13' },
-  { id: 5, title: 'Litho机台配置修改', description: '修改光刻机曝光参数配置文件，支持新工艺配方。需要更新config文件并进行机台验证测试。', priority: 'medium', status: 'testing', equipment_id: 1, created_at: '2026-07-03', updated_at: '2026-07-12' },
-  { id: 6, title: 'Etch设备监控增强', description: '增加刻蚀设备实时监控告警功能，支持异常状态自动推送通知。已完成开发和部署。', priority: 'low', status: 'completed', equipment_id: 2, created_at: '2026-06-20', updated_at: '2026-07-01' },
-  { id: 7, title: 'Diffusion炉管温控优化', description: '优化Diffusion炉管温度控制算法，提高温控精度。涉及驱动代码修改和PID参数调优。', priority: 'high', status: 'pending', equipment_id: 3, created_at: '2026-07-09', updated_at: '2026-07-09' },
-  { id: 8, title: 'PVD设备通信协议升级', description: '升级PVD设备通信协议从SECS-I到SECS-II，提升数据传输效率。需要重写驱动通信层。', priority: 'critical', status: 'in_progress', equipment_id: 4, created_at: '2026-07-06', updated_at: '2026-07-13' },
-];
 
-const mockEquipment: Equipment[] = [
-  { id: 1, ap_id: 1, ap_name: 'AP-001', eq_name: 'CATEOX-57', eq_type: 'CPC', eq_model: 'KEDJ-8350V-LPT', vendor: 'ASML', server_id: 'SRV-001', driver_type: 'TCP/IP', driver_version: 'v3.2.1', snmp_ip: '192.168.1.101', snmp_port: '161', driver1_ip: '192.168.1.101', driver1_port: '5000', driver2_ip: '', driver2_port: '', area: 'DF', baud_rate: '', status: 'online', location: 'Fab-A-1F-Bay01', installed_at: '2025-06-15', updated_at: '2026-07-13' },
-  { id: 2, ap_id: 2, ap_name: 'AP-002', eq_name: 'GATEOX-57', eq_type: 'GATEOX', eq_model: 'KEDJ-82800S', vendor: 'TEL', server_id: 'SRV-002', driver_type: 'TCP/IP', driver_version: 'v3.2.1', snmp_ip: '192.168.1.102', snmp_port: '161', driver1_ip: '192.168.1.102', driver1_port: '5001', driver2_ip: '', driver2_port: '', area: 'TF', baud_rate: '', status: 'online', location: 'Fab-A-1F-Bay02', installed_at: '2025-08-20', updated_at: '2026-07-13' },
-  { id: 3, ap_id: 3, ap_name: 'AP-003', eq_name: 'CPC-55', eq_type: 'CPC', eq_model: 'DNSA8S2000', vendor: 'DNS', server_id: 'SRV-003', driver_type: 'TCP/IP', driver_version: 'v2.1.0', snmp_ip: '192.168.1.103', snmp_port: '161', driver1_ip: '192.168.1.103', driver1_port: '5002', driver2_ip: '', driver2_port: '', area: 'TF', baud_rate: '', status: 'maintenance', location: 'Fab-B-2F-Bay05', installed_at: '2024-12-01', updated_at: '2026-07-12' },
-  { id: 4, ap_id: 4, ap_name: 'AP-004', eq_name: 'TTOX-54', eq_type: 'TTOX', eq_model: 'Thermawave OP5205T', vendor: 'Thermawave', server_id: 'SRV-004', driver_type: 'TCP/IP', driver_version: 'v4.0.0', snmp_ip: '192.168.1.104', snmp_port: '161', driver1_ip: '192.168.1.104', driver1_port: '5003', driver2_ip: '', driver2_port: '', area: 'FF', baud_rate: '', status: 'online', location: 'Fab-C-3F-Bay03', installed_at: '2025-03-10', updated_at: '2026-07-13' },
-];
 
 // 四象限分类逻辑
 // 紧急度: critical=紧急, high=较紧急, medium=一般, low=不紧急
@@ -69,9 +53,7 @@ const quadrantConfig = [
 
 export default function Requirements() {
   const navigate = useNavigate();
-  const { setRequirements, addRequirement, deleteRequirement } = useAppStore();
-  const [requirementList, setRequirementList] = useState<Requirement[]>(mockRequirements);
-  const [equipmentList, setEquipmentList] = useState<Equipment[]>(mockEquipment);
+  const { requirements, equipment, projects, setRequirements, setEquipment, setProjects, addRequirement, updateRequirement, deleteRequirement } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -83,29 +65,30 @@ export default function Requirements() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [reqRes, equipRes] = await Promise.all([
+        const [reqRes, equipRes, projectRes] = await Promise.all([
           requirementAPI.list(),
           equipmentAPI.list(),
+          projectAPI.list(),
         ]);
         if (reqRes.success) {
-          setRequirementList(reqRes.data);
           setRequirements(reqRes.data);
         }
         if (equipRes.success) {
-          setEquipmentList(equipRes.data);
+          setEquipment(equipRes.data);
         }
-      } catch {
-        setRequirementList(mockRequirements);
-        setRequirements(mockRequirements);
-        setEquipmentList(mockEquipment);
+        if (projectRes.success) {
+          setProjects(projectRes.data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch data:', err);
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, [setRequirements]);
+  }, [setRequirements, setEquipment]);
 
-  const filteredRequirements = requirementList.filter((req) => {
+  const filteredRequirements = requirements.filter((req) => {
     const matchesSearch = req.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       req.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPriority = priorityFilter === 'all' || req.priority === priorityFilter;
@@ -119,19 +102,9 @@ export default function Requirements() {
       const res = await requirementAPI.create(formData);
       if (res.success) {
         addRequirement(res.data);
-        setRequirementList((prev) => [res.data, ...prev]);
       }
-    } catch {
-      const newRequirement: Requirement = {
-        id: Date.now(),
-        ...formData,
-        priority: formData.priority || 'medium',
-        status: 'pending',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      } as Requirement;
-      addRequirement(newRequirement);
-      setRequirementList((prev) => [newRequirement, ...prev]);
+    } catch (err) {
+      console.error('Failed to create requirement:', err);
     }
     setIsCreateModalOpen(false);
     setFormData({ title: '', description: '' });
@@ -142,10 +115,8 @@ export default function Requirements() {
     try {
       await requirementAPI.delete(id);
       deleteRequirement(id);
-      setRequirementList((prev) => prev.filter((r) => r.id !== id));
-    } catch {
-      deleteRequirement(id);
-      setRequirementList((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      console.error('Failed to delete requirement:', err);
     }
   };
 
@@ -193,7 +164,7 @@ export default function Requirements() {
 
   const getEquipmentName = (equipmentId?: number) => {
     if (!equipmentId) return '未关联';
-    const eq = equipmentList.find((e) => e.id === equipmentId);
+    const eq = equipment.find((e) => e.id === equipmentId);
     return eq ? eq.eq_name : '未知机台';
   };
 
@@ -584,6 +555,19 @@ export default function Requirements() {
             </select>
           </div>
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">关联项目</label>
+            <select
+              value={formData.project_id}
+              onChange={(e) => setFormData({ ...formData, project_id: parseInt(e.target.value) || undefined })}
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+            >
+              <option value="">不关联项目</option>
+              {projects.map((item) => (
+                <option key={item.id} value={item.id}>{item.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">关联机台</label>
             <select
               value={formData.equipment_id}
@@ -591,7 +575,7 @@ export default function Requirements() {
               className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
             >
               <option value="">不关联机台</option>
-              {equipmentList.map((item) => (
+              {equipment.map((item) => (
                 <option key={item.id} value={item.id}>{item.eq_name} ({item.ap_name})</option>
               ))}
             </select>

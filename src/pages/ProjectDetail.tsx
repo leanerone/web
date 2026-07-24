@@ -9,28 +9,14 @@ import {
   Plus,
   Edit,
   Trash2,
-  FolderKanban,
   Target,
-  Users,
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
+import { projectAPI, taskAPI } from '@/services/api';
 import type { Project, Task } from '@/types';
-
-const mockProjects: Project[] = [
-  { id: 1, name: 'EAP系统升级v2.0', description: '升级现有EAP系统至新版本，支持更多机台类型和设备驱动', status: 'active', start_date: '2026-01-15', end_date: '2026-06-30', progress: 75, created_at: '2026-01-15', updated_at: '2026-07-13' },
-  { id: 2, name: 'Litho机台驱动优化', description: '优化光刻机关键驱动性能，提升吞吐量和稳定性', status: 'active', start_date: '2026-03-01', end_date: '2026-08-31', progress: 45, created_at: '2026-03-01', updated_at: '2026-07-13' },
-];
-
-const mockTasks: Task[] = [
-  { id: 1, project_id: 1, title: '完成EAP系统API接口设计', description: '设计RESTful API接口，包含设备管理、任务管理、数据采集等模块', status: 'completed', priority: 'high', due_date: '2026-02-28', created_at: '2026-01-15', updated_at: '2026-02-28' },
-  { id: 2, project_id: 1, title: '编写数据库迁移脚本', description: '创建Oracle数据库表结构和迁移脚本', status: 'in_progress', priority: 'medium', due_date: '2026-03-15', created_at: '2026-02-01', updated_at: '2026-07-13' },
-  { id: 3, project_id: 1, title: '前端页面开发', description: '开发仪表盘、设备管理、任务管理等前端页面', status: 'in_progress', priority: 'high', due_date: '2026-04-30', created_at: '2026-02-15', updated_at: '2026-07-13' },
-  { id: 4, project_id: 1, title: '设备驱动集成测试', description: '集成测试新驱动与EAP系统的兼容性', status: 'pending', priority: 'high', due_date: '2026-05-30', created_at: '2026-03-01', updated_at: '2026-03-01' },
-  { id: 5, project_id: 1, title: '用户验收测试(UAT)', description: '组织用户进行验收测试', status: 'pending', priority: 'medium', due_date: '2026-06-15', created_at: '2026-04-01', updated_at: '2026-04-01' },
-];
 
 const milestones = [
   { id: 1, title: '需求分析完成', date: '2026-01-31', completed: true },
@@ -50,13 +36,25 @@ export default function ProjectDetail() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const projectId = parseInt(id || '0');
-    const foundProject = mockProjects.find((p) => p.id === projectId);
-    if (foundProject) {
-      setProject(foundProject);
-      setProjectTasks(mockTasks.filter((t) => t.project_id === projectId));
-    }
-    setLoading(false);
+    const fetchProjectDetail = async () => {
+      const projectId = parseInt(id || '0');
+      try {
+        const projectRes = await projectAPI.get(projectId);
+        if (projectRes.success) {
+          setProject(projectRes.data);
+        }
+        
+        const tasksRes = await taskAPI.list(projectId);
+        if (tasksRes.success) {
+          setProjectTasks(tasksRes.data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch project detail:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchProjectDetail();
   }, [id]);
 
   const getStatusColor = (status: string) => {
@@ -99,20 +97,22 @@ export default function ProjectDetail() {
     return labels[priority] || priority;
   };
 
-  const handleCreateTask = () => {
-    if (!formData.title) return;
-    const newTask: Task = {
-      id: Date.now(),
-      project_id: project?.id || 0,
-      title: formData.title || '',
-      description: formData.description || '',
-      status: 'pending',
-      priority: (formData.priority as Task['priority']) || 'medium',
-      due_date: formData.due_date || '',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    setProjectTasks((prev) => [...prev, newTask]);
+  const handleCreateTask = async () => {
+    if (!formData.title || !project) return;
+    try {
+      const res = await taskAPI.create({
+        project_id: project.id,
+        title: formData.title,
+        description: formData.description,
+        priority: (formData.priority as Task['priority']) || 'medium',
+        due_date: formData.due_date,
+      });
+      if (res.success) {
+        setProjectTasks((prev) => [...prev, res.data]);
+      }
+    } catch (err) {
+      console.error('Failed to create task:', err);
+    }
     setIsCreateTaskModalOpen(false);
     setFormData({ title: '', priority: 'medium' });
   };
@@ -367,59 +367,69 @@ export default function ProjectDetail() {
         </div>
 
         <div className="space-y-3">
-          {projectTasks.map((task) => (
-            <div 
-              key={task.id} 
-              className={`p-4 rounded-lg border transition-all ${
-                task.status === 'completed' 
-                  ? 'bg-green-50 border-green-200' 
-                  : 'bg-white border-gray-200 hover:border-cyan-300'
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <button 
-                    onClick={() => {}}
-                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                      task.status === 'completed' 
-                        ? 'bg-green-500 border-green-500' 
-                        : 'border-gray-300 hover:border-cyan-500'
-                    }`}
-                  >
-                    {task.status === 'completed' && (
-                      <CheckCircle2 className="w-3 h-3 text-white" />
-                    )}
-                  </button>
-                  <div>
-                    <h4 className={`font-medium ${task.status === 'completed' ? 'text-green-700 line-through' : 'text-gray-800'}`}>
-                      {task.title}
-                    </h4>
-                    {task.description && (
-                      <p className="text-sm text-gray-500 mt-1">{task.description}</p>
+          {projectTasks.length === 0 ? (
+            <div className="py-8 text-center text-gray-400">
+              <p>暂无任务</p>
+              <Button onClick={() => setIsCreateTaskModalOpen(true)} className="mt-4">
+                <Plus className="w-4 h-4" />
+                添加第一个任务
+              </Button>
+            </div>
+          ) : (
+            projectTasks.map((task) => (
+              <div 
+                key={task.id} 
+                className={`p-4 rounded-lg border transition-all ${
+                  task.status === 'completed' 
+                    ? 'bg-green-50 border-green-200' 
+                    : 'bg-white border-gray-200 hover:border-cyan-300'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <button 
+                      onClick={() => {}}
+                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
+                        task.status === 'completed' 
+                          ? 'bg-green-500 border-green-500' 
+                          : 'border-gray-300 hover:border-cyan-500'
+                      }`}
+                    >
+                      {task.status === 'completed' && (
+                        <CheckCircle2 className="w-3 h-3 text-white" />
+                      )}
+                    </button>
+                    <div>
+                      <h4 className={`font-medium ${task.status === 'completed' ? 'text-green-700 line-through' : 'text-gray-800'}`}>
+                        {task.title}
+                      </h4>
+                      {task.description && (
+                        <p className="text-sm text-gray-500 mt-1">{task.description}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${getPriorityColor(task.priority)}`}>
+                      {getPriorityLabel(task.priority)}
+                    </span>
+                    <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                      task.status === 'completed' ? 'bg-green-50 text-green-600' :
+                      task.status === 'in_progress' ? 'bg-cyan-50 text-cyan-600' :
+                      'bg-gray-50 text-gray-500'
+                    }`}>
+                      {getStatusLabel(task.status)}
+                    </span>
+                    {task.due_date && (
+                      <div className="flex items-center gap-1 text-sm text-gray-500">
+                        <Clock className="w-4 h-4" />
+                        {task.due_date}
+                      </div>
                     )}
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${getPriorityColor(task.priority)}`}>
-                    {getPriorityLabel(task.priority)}
-                  </span>
-                  <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                    task.status === 'completed' ? 'bg-green-50 text-green-600' :
-                    task.status === 'in_progress' ? 'bg-cyan-50 text-cyan-600' :
-                    'bg-gray-50 text-gray-500'
-                  }`}>
-                    {getStatusLabel(task.status)}
-                  </span>
-                  {task.due_date && (
-                    <div className="flex items-center gap-1 text-sm text-gray-500">
-                      <Clock className="w-4 h-4" />
-                      {task.due_date}
-                    </div>
-                  )}
-                </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </Card>
 

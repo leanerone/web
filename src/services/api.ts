@@ -17,6 +17,10 @@ import type {
   AIWeeklyReportRequest,
   PaginationParams,
   SearchParams,
+  User,
+  AISettings,
+  NotesSettings,
+  SystemSetting,
 } from '@/types';
 
 const STORAGE_KEY = 'cim_auth';
@@ -157,6 +161,29 @@ export const aiAPI = {
   
   weeklyReport: (data: AIWeeklyReportRequest): Promise<APIResponse<{ content: string }>> =>
     api.post('/ai/weekly-report', data),
+
+  dailyStandup: (data: { work_items?: import('@/types').WorkItem[]; date?: string }): Promise<APIResponse<{
+    today_tasks: import('@/types').WorkItem[];
+    overdue_tasks: import('@/types').WorkItem[];
+    suggestions: string[];
+    summary: string;
+  }>> =>
+    api.post('/ai/daily-standup', data),
+
+  smartSort: (data: { work_items: import('@/types').WorkItem[]; strategy?: string }): Promise<APIResponse<{
+    sorted_items: import('@/types').WorkItem[];
+    strategy: string;
+    explanation: string;
+  }>> =>
+    api.post('/ai/smart-sort', data),
+
+  checkReminders: (data: { work_items?: import('@/types').WorkItem[]; date?: string }): Promise<APIResponse<{
+    overdue_count: number;
+    high_priority_count: number;
+    reminders: { type: string; item_id: number; title: string; message: string }[];
+    message: string;
+  }>> =>
+    api.post('/ai/check-reminders', data),
 };
 
 export const notesAPI = {
@@ -171,11 +198,123 @@ export const notesAPI = {
   
   getDocument: (id: number): Promise<APIResponse<NotesDocument>> =>
     api.get(`/notes/documents/${id}`),
+  
+  parseUrl: (url: string): Promise<APIResponse<{
+    title: string;
+    database: string;
+    view: string;
+    document: string;
+    server: string;
+    replica_id: string;
+    view_id: string;
+    note_id: string;
+    original_url: string;
+  }>> =>
+    api.post('/notes/parse-url', { url }),
+  
+  importByUrl: (url: string, project_id?: number): Promise<APIResponse<NotesDocument[]>> =>
+    api.post('/notes/import-by-url', { url, project_id }),
 };
 
 export const dashboardAPI = {
   stats: (): Promise<APIResponse<DashboardStats>> =>
     api.get('/dashboard/stats'),
+};
+
+export const userAPI = {
+  list: (): Promise<APIResponse<User[]>> =>
+    api.get('/users'),
+  
+  get: (id: number): Promise<APIResponse<User>> =>
+    api.get(`/users/${id}`),
+  
+  create: (data: Partial<User>): Promise<APIResponse<User>> =>
+    api.post('/users', data),
+  
+  update: (id: number, data: Partial<User>): Promise<APIResponse<User>> =>
+    api.put(`/users/${id}`, data),
+  
+  delete: (id: number): Promise<APIResponse<void>> =>
+    api.delete(`/users/${id}`),
+};
+
+export const settingsAPI = {
+  list: (category?: string): Promise<APIResponse<SystemSetting[]>> =>
+    api.get('/settings', { params: category ? { category } : {} }),
+  
+  get: (key: string): Promise<APIResponse<SystemSetting>> =>
+    api.get(`/settings/${key}`),
+  
+  update: (key: string, value: string, description?: string, category?: string): Promise<APIResponse<SystemSetting>> =>
+    api.put(`/settings/${key}`, null, { params: { value, description, category } }),
+  
+  getAISettings: (): Promise<APIResponse<AISettings>> =>
+    api.get('/settings/ai/config'),
+  
+  saveAISettings: (data: AISettings): Promise<APIResponse<void>> =>
+    api.post('/settings/ai/config', data),
+  
+  getNotesSettings: (): Promise<APIResponse<NotesSettings>> =>
+    api.get('/settings/notes/config'),
+  
+  saveNotesSettings: (data: NotesSettings): Promise<APIResponse<void>> =>
+    api.post('/settings/notes/config', data),
+};
+
+export const workItemsAPI = {
+  listCategories: (): Promise<APIResponse<import('@/types').WorkCategory[]>> =>
+    api.get('/work/categories'),
+  
+  createCategory: (data: Partial<import('@/types').WorkCategory>): Promise<APIResponse<import('@/types').WorkCategory>> =>
+    api.post('/work/categories', data),
+  
+  updateCategory: (id: number, data: Partial<import('@/types').WorkCategory>): Promise<APIResponse<import('@/types').WorkCategory>> =>
+    api.put(`/work/categories/${id}`, data),
+  
+  deleteCategory: (id: number): Promise<APIResponse<void>> =>
+    api.delete(`/work/categories/${id}`),
+  
+  initCategories: (): Promise<APIResponse<void>> =>
+    api.post('/work/categories/init'),
+  
+  list: (params?: {
+    category_id?: number;
+    status?: string;
+    project_id?: number;
+    urgency?: string;
+    importance?: string;
+    sort_by?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<APIResponse<import('@/types').WorkItem[]>> =>
+    api.get('/work/items', { params }),
+  
+  get: (id: number): Promise<APIResponse<import('@/types').WorkItem>> =>
+    api.get(`/work/items/${id}`),
+  
+  create: (data: import('@/types').CreateWorkItemRequest): Promise<APIResponse<import('@/types').WorkItem>> =>
+    api.post('/work/items', data),
+  
+  update: (id: number, data: Partial<import('@/types').CreateWorkItemRequest>): Promise<APIResponse<import('@/types').WorkItem>> =>
+    api.put(`/work/items/${id}`, data),
+  
+  delete: (id: number): Promise<APIResponse<void>> =>
+    api.delete(`/work/items/${id}`),
+  
+  importTable: (table_text: string, project_id?: number): Promise<APIResponse<{ data: import('@/types').WorkItem[]; count: number }>> =>
+    api.post('/work/import-table', { table_text, project_id }),
+  
+  getLogs: (work_item_id?: number): Promise<APIResponse<import('@/types').WorkLog[]>> =>
+    api.get('/work/logs', { params: work_item_id ? { work_item_id } : {} }),
+  
+  getDailyPlan: (plan_date?: string, user_id?: number): Promise<APIResponse<import('@/types').DailyPlan>> =>
+    api.get('/work/daily-plan', { params: { plan_date, user_id } }),
+  
+  saveDailyPlan: (data: { plan_date: string; items_order?: string; ai_suggestions?: string; summary?: string; user_id?: number }): Promise<APIResponse<import('@/types').DailyPlan>> =>
+    api.post('/work/daily-plan', data),
+  
+  getStats: (): Promise<APIResponse<import('@/types').WorkStats>> =>
+    api.get('/work/stats'),
 };
 
 export default api;

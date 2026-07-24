@@ -1,5 +1,6 @@
 import json
 from typing import List, Dict
+from datetime import datetime, date
 from config.settings import settings
 
 
@@ -238,4 +239,185 @@ def _mock_weekly_report(start_date: str, end_date: str, projects: List[Dict] = N
 六、问题与建议
 暂无重大问题，建议继续保持良好的工作节奏。
 """
+    }
+
+
+def generate_daily_standup(work_items: List[Dict] = None, target_date: str = None) -> Dict:
+    if settings.openai_api_key:
+        return _call_openai_standup(work_items, target_date)
+    else:
+        return _mock_standup(work_items, target_date)
+
+
+def smart_sort_work_items(work_items: List[Dict], strategy: str = "priority") -> Dict:
+    if strategy == "priority":
+        sorted_items = sorted(
+            work_items,
+            key=lambda x: (
+                x.get('priority_score', 0),
+                {'high': 0, 'medium': 1, 'low': 2, 'na': 3}.get(x.get('urgency', 'na'), 3),
+                {'high': 0, 'medium': 1, 'low': 2, 'na': 3}.get(x.get('importance', 'na'), 3)
+            ),
+            reverse=True
+        )
+        explanation = "按优先级分数降序排列，紧急度高的在前"
+    elif strategy == "deadline":
+        sorted_items = sorted(
+            work_items,
+            key=lambda x: x.get('due_date') or '9999-12-31'
+        )
+        explanation = "按截止日期升序排列，先到期的在前"
+    elif strategy == "category":
+        sorted_items = sorted(
+            work_items,
+            key=lambda x: (x.get('category', {}).get('sort_order', 99), x.get('priority_score', 0)),
+            reverse=True
+        )
+        explanation = "按类别分组，每组内按优先级排序"
+    else:
+        sorted_items = work_items
+        explanation = "保持原顺序"
+
+    return {
+        "sorted_items": sorted_items,
+        "strategy": strategy,
+        "explanation": explanation
+    }
+
+
+def check_reminders(work_items: List[Dict] = None, target_date: str = None) -> Dict:
+    if not target_date:
+        target_date = date.today().isoformat()
+
+    overdue = []
+    high_priority = []
+    reminders = []
+
+    for item in (work_items or []):
+        item_due = item.get('due_date')
+        if item_due and item_due < target_date and item.get('status') != 'completed':
+            overdue.append(item)
+            reminders.append({
+                "type": "overdue",
+                "item_id": item.get('id'),
+                "title": item.get('title'),
+                "message": f"任务已逾期: {item.get('title')}",
+                "due_date": item_due
+            })
+
+        if item.get('urgency') == 'high' or item.get('importance') == 'high':
+            if item.get('status') != 'completed':
+                high_priority.append(item)
+                if not any(r['item_id'] == item.get('id') for r in reminders):
+                    reminders.append({
+                        "type": "high_priority",
+                        "item_id": item.get('id'),
+                        "title": item.get('title'),
+                        "message": f"高优先级任务待处理: {item.get('title')}",
+                        "priority_score": item.get('priority_score', 0)
+                    })
+
+    message_parts = []
+    if overdue:
+        message_parts.append(f"有 {len(overdue)} 个逾期任务")
+    if high_priority:
+        message_parts.append(f"有 {len(high_priority)} 个高优先级任务")
+    if not message_parts:
+        message = "今日暂无待办提醒，工作节奏良好"
+    else:
+        message = "，".join(message_parts) + "，请及时处理"
+
+    return {
+        "overdue_count": len(overdue),
+        "high_priority_count": len(high_priority),
+        "reminders": reminders,
+        "message": message
+    }
+
+
+def _call_openai_standup(work_items: List[Dict] = None, target_date: str = None) -> Dict:
+    from openai import OpenAI
+    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_api_base)
+
+    today = target_date or date.today().isoformat()
+    pending = [w for w in (work_items or []) if w.get('status') != 'completed']
+    completed = [w for w in (work_items or []) if w.get('status') == 'completed']
+    overdue = [w for w in pending if w.get('due_date') and w.get('due_date') < today]
+
+    prompt = f"""
+作为AI工作助手，请为工程师生成今日工作简报。
+
+日期: {today}
+待处理工作项 ({len(pending)} 项):
+{chr(10).join([f"- {w.get('title')} [优先级:{w.get('priority_score',0):.1f}]" for w in pending[:10]])}
+
+已完成 ({len(completed)} 项)
+逾期 ({len(overdue)} 项)
+
+请生成：
+1. 3条今日待办建议（按优先级）
+2. 1句鼓励的话
+3. 1条改进建议
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "你是一位专业的工作效率助手，擅长帮助工程师规划每日工作。"},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.7
+    )
+
+    content = response.choices[0].message.content
+    suggestions = [line.strip('-* ').strip() for line in content.split('\n') if line.strip().startswith(('-', '*'))]
+
+    return {
+        "today_tasks": pending[:5],
+        "overdue_tasks": overdue,
+        "suggestions": suggestions[:5] if suggestions else [
+            "优先处理高优先级任务",
+            "合理安排时间，避免任务堆积",
+            "及时更新任务状态"
+        ],
+        "summary": content
+    }
+
+
+def _mock_standup(work_items: List[Dict] = None, target_date: str = None) -> Dict:
+    today = target_date or date.today().isoformat()
+    pending = [w for w in (work_items or []) if w.get('status') != 'completed']
+    completed = [w for w in (work_items or []) if w.get('status') == 'completed']
+    overdue = [w for w in pending if w.get('due_date') and w.get('due_date') < today]
+
+    high_priority = sorted(
+        [w for w in pending if w.get('priority_score', 0) >= 7],
+        key=lambda x: x.get('priority_score', 0),
+        reverse=True
+    )
+
+    suggestions = []
+    if overdue:
+        suggestions.append(f"⚠️ 有 {len(overdue)} 个逾期任务需要优先处理")
+    if high_priority:
+        suggestions.append(f"🔥 建议优先处理高优先级任务: {high_priority[0].get('title', '')}")
+    suggestions.append("💡 合理安排时间，保持工作节奏")
+    suggestions.append("📝 完成任务后及时更新状态")
+
+    summary = f"""
+📅 {today} 工作简报
+
+待处理: {len(pending)} 项 | 已完成: {len(completed)} 项 | 逾期: {len(overdue)} 项
+
+今日建议:
+{chr(10).join(suggestions)}
+
+加油！保持专注，高效完成今日工作！
+"""
+
+    return {
+        "today_tasks": pending[:5],
+        "overdue_tasks": overdue,
+        "suggestions": suggestions,
+        "summary": summary
     }

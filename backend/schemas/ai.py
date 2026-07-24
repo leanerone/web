@@ -32,3 +32,38 @@ class AIWeeklyReportRequest(BaseModel):
 
 class AIWeeklyReportResponse(BaseModel):
     content: str
+
+
+class DailyStandupRequest(BaseModel):
+    work_items: Optional[List[dict]] = None
+    date: Optional[str] = None
+
+
+class DailyStandupResponse(BaseModel):
+    today_tasks: List[dict]
+    overdue_tasks: List[dict]
+    suggestions: List[str]
+    summary: str
+
+
+class SmartSortRequest(BaseModel):
+    work_items: List[dict]
+    strategy: Optional[str] = "priority"
+
+
+class SmartSortResponse(BaseModel):
+    sorted_items: List[dict]
+    strategy: str
+    explanation: str
+
+
+class ReminderCheckRequest(BaseModel):
+    work_items: Optional[List[dict]] = None
+    date: Optional[str] = None
+
+
+class ReminderCheckResponse(BaseModel):
+    overdue_count: int
+    high_priority_count: int
+    reminders: List[dict]
+    message: str

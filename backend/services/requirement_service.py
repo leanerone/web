@@ -3,7 +3,7 @@ from database.models import Requirement, RequirementStatus, RequirementPriority
 from schemas.requirement import RequirementCreate, RequirementUpdate
 
 
-def get_requirements(db: Session, keyword: str = None, status: str = None, priority: str = None, page: int = 1, limit: int = 10):
+def get_requirements(db: Session, keyword: str = None, status: str = None, priority: str = None, project_id: int = None, equipment_id: int = None, page: int = 1, limit: int = 100):
     query = db.query(Requirement)
     if keyword:
         query = query.filter(Requirement.title.contains(keyword))
@@ -11,8 +11,12 @@ def get_requirements(db: Session, keyword: str = None, status: str = None, prior
         query = query.filter(Requirement.status == status)
     if priority:
         query = query.filter(Requirement.priority == priority)
+    if project_id:
+        query = query.filter(Requirement.project_id == project_id)
+    if equipment_id:
+        query = query.filter(Requirement.equipment_id == equipment_id)
     total = query.count()
-    requirements = query.offset((page - 1) * limit).limit(limit).all()
+    requirements = query.order_by(Requirement.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
     return requirements, total
 
 
@@ -25,6 +29,7 @@ def create_requirement(db: Session, requirement: RequirementCreate):
         title=requirement.title,
         description=requirement.description,
         priority=RequirementPriority(requirement.priority) if requirement.priority else RequirementPriority.medium,
+        project_id=requirement.project_id,
         equipment_id=requirement.equipment_id,
     )
     db.add(db_requirement)
@@ -45,6 +50,8 @@ def update_requirement(db: Session, requirement_id: int, requirement: Requiremen
         db_requirement.priority = RequirementPriority(requirement.priority)
     if requirement.status is not None:
         db_requirement.status = RequirementStatus(requirement.status)
+    if requirement.project_id is not None:
+        db_requirement.project_id = requirement.project_id
     if requirement.equipment_id is not None:
         db_requirement.equipment_id = requirement.equipment_id
     db.commit()

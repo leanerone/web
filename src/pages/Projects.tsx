@@ -21,18 +21,9 @@ import { projectAPI } from '@/services/api';
 import useAppStore from '@/stores/appStore';
 import type { Project, CreateProjectRequest } from '@/types';
 
-const mockProjects: Project[] = [
-  { id: 1, name: 'EAP系统升级v2.0', description: '升级现有EAP系统至新版本，支持更多机台类型', status: 'active', start_date: '2026-01-15', end_date: '2026-06-30', progress: 75, created_at: '2026-01-15', updated_at: '2026-07-13' },
-  { id: 2, name: 'Litho机台驱动优化', description: '优化光刻机关键驱动性能，提升吞吐量', status: 'active', start_date: '2026-03-01', end_date: '2026-08-31', progress: 45, created_at: '2026-03-01', updated_at: '2026-07-13' },
-  { id: 3, name: 'CMP设备集成', description: '集成新CMP设备至CIM系统，完成接口开发', status: 'active', start_date: '2026-05-01', end_date: '2026-11-30', progress: 20, created_at: '2026-05-01', updated_at: '2026-07-13' },
-  { id: 4, name: 'PECVD监控系统开发', description: '开发PECVD设备实时监控系统', status: 'completed', start_date: '2025-10-01', end_date: '2026-03-31', progress: 100, created_at: '2025-10-01', updated_at: '2026-03-31' },
-  { id: 5, name: 'Metrology数据整合', description: '整合各类量测设备数据，建立统一数据仓库', status: 'paused', start_date: '2026-02-01', end_date: '2026-09-30', progress: 30, created_at: '2026-02-01', updated_at: '2026-06-15' },
-];
-
 export default function Projects() {
   const navigate = useNavigate();
-  const { setProjects, addProject, deleteProject } = useAppStore();
-  const [projectList, setProjectList] = useState<Project[]>(mockProjects);
+  const { projects, setProjects, addProject, updateProject, deleteProject } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -48,12 +39,10 @@ export default function Projects() {
       try {
         const res = await projectAPI.list();
         if (res.success) {
-          setProjectList(res.data);
           setProjects(res.data);
         }
-      } catch {
-        setProjectList(mockProjects);
-        setProjects(mockProjects);
+      } catch (err) {
+        console.error('Failed to fetch projects:', err);
       } finally {
         setLoading(false);
       }
@@ -72,7 +61,7 @@ export default function Projects() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filteredProjects = projectList.filter((project) => {
+  const filteredProjects = projects.filter((project) => {
     const matchesSearch = project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       project.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === 'all' || project.status === statusFilter;
@@ -104,37 +93,29 @@ export default function Projects() {
   const handleSave = async () => {
     if (!formData.name) return;
     if (modalMode === 'edit' && editingProject) {
-      const updatedProject: Project = {
-        ...editingProject,
-        name: formData.name,
-        description: formData.description || '',
-        status: (formData.status as Project['status']) || editingProject.status,
-        progress: formData.progress ?? editingProject.progress,
-        start_date: formData.start_date || editingProject.start_date,
-        end_date: formData.end_date || editingProject.end_date,
-        updated_at: new Date().toISOString(),
-      };
-      setProjectList((prev) => prev.map((p) => p.id === editingProject.id ? updatedProject : p));
+      try {
+        const res = await projectAPI.update(editingProject.id, {
+          name: formData.name,
+          description: formData.description,
+          status: formData.status as Project['status'],
+          progress: formData.progress,
+          start_date: formData.start_date,
+          end_date: formData.end_date,
+        });
+        if (res.success) {
+          updateProject(res.data);
+        }
+      } catch (err) {
+        console.error('Failed to update project:', err);
+      }
     } else {
       try {
         const res = await projectAPI.create(formData);
         if (res.success) {
           addProject(res.data);
-          setProjectList((prev) => [res.data, ...prev]);
         }
-      } catch {
-        const newProject: Project = {
-          id: Date.now(),
-          ...formData,
-          status: 'active',
-          progress: 0,
-          start_date: formData.start_date || new Date().toISOString().split('T')[0],
-          end_date: formData.end_date || '',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        addProject(newProject);
-        setProjectList((prev) => [newProject, ...prev]);
+      } catch (err) {
+        console.error('Failed to create project:', err);
       }
     }
     setIsModalOpen(false);
@@ -147,35 +128,37 @@ export default function Projects() {
     try {
       await projectAPI.delete(id);
       deleteProject(id);
-      setProjectList((prev) => prev.filter((p) => p.id !== id));
-    } catch {
-      deleteProject(id);
-      setProjectList((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      console.error('Failed to delete project:', err);
     }
   };
 
-  const handleCopy = (project: Project) => {
-    const copiedProject: Project = {
-      ...project,
-      id: Date.now(),
-      name: `${project.name} (副本)`,
-      status: 'active',
-      progress: 0,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    addProject(copiedProject);
-    setProjectList((prev) => [copiedProject, ...prev]);
+  const handleCopy = async (project: Project) => {
+    try {
+      const res = await projectAPI.create({
+        name: `${project.name} (副本)`,
+        description: project.description,
+        start_date: project.start_date,
+        end_date: project.end_date,
+      });
+      if (res.success) {
+        addProject(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to copy project:', err);
+    }
     setOpenMenuId(null);
   };
 
-  const handleArchive = (project: Project) => {
-    const archivedProject: Project = {
-      ...project,
-      status: 'paused',
-      updated_at: new Date().toISOString(),
-    };
-    setProjectList((prev) => prev.map((p) => p.id === project.id ? archivedProject : p));
+  const handleArchive = async (project: Project) => {
+    try {
+      const res = await projectAPI.update(project.id, { status: 'paused' });
+      if (res.success) {
+        updateProject(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to archive project:', err);
+    }
     setOpenMenuId(null);
   };
 
@@ -252,7 +235,13 @@ export default function Projects() {
             </div>
           ) : (
             filteredProjects.map((project) => (
-              <Card key={project.id} title={project.name} hover className="group">
+              <Card 
+                key={project.id} 
+                title={project.name} 
+                hover 
+                className="group cursor-pointer"
+                onClick={() => navigate(`/projects/${project.id}`)}
+              >
                 <p className="text-sm text-gray-500 mb-4 line-clamp-2">{project.description}</p>
                 
                 <div className="space-y-3 mb-4">

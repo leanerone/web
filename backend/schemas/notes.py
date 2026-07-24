@@ -20,3 +20,8 @@ class NotesDocumentResponse(BaseModel):
 class NotesImportRequest(BaseModel):
     project_id: Optional[int] = None
     notes_id: Optional[str] = None
+
+
+class NotesUrlImportRequest(BaseModel):
+    url: str
+    project_id: Optional[int] = None

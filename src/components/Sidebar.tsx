@@ -10,17 +10,25 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
+  Settings,
+  Users,
+  Briefcase,
+  Target,
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import useAppStore from '@/stores/appStore';
 
 const menuItems = [
-  { id: 'dashboard', icon: LayoutDashboard, label: '仪表盘', path: '/' },
+  { id: 'work-dashboard', icon: Target, label: '工作仪表盘', path: '/work-dashboard' },
+  { id: 'work-items', icon: Briefcase, label: '工作管理', path: '/work-items' },
+  { id: 'dashboard', icon: LayoutDashboard, label: '系统仪表盘', path: '/dashboard' },
   { id: 'projects', icon: FolderKanban, label: '项目管理', path: '/projects' },
   { id: 'equipment', icon: Cpu, label: '机台管理', path: '/equipment' },
   { id: 'requirements', icon: ClipboardList, label: '需求管理', path: '/requirements' },
   { id: 'ai-assistant', icon: Bot, label: 'AI规划助手', path: '/ai-assistant' },
   { id: 'weekly-report', icon: FileText, label: '周报管理', path: '/weekly-report' },
+  { id: 'users', icon: Users, label: '用户管理', path: '/users' },
+  { id: 'settings', icon: Settings, label: '系统设置', path: '/settings' },
 ];
 
 export default function Sidebar() {

@@ -12,11 +12,13 @@ def list_requirements(
     keyword: str = Query(None),
     status: str = Query(None),
     priority: str = Query(None),
+    project_id: int = Query(None),
+    equipment_id: int = Query(None),
     page: int = Query(1, ge=1),
-    limit: int = Query(10, ge=1, le=100),
+    limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
-    requirements, total = get_requirements(db, keyword, status, priority, page, limit)
+    requirements, total = get_requirements(db, keyword, status, priority, project_id, equipment_id, page, limit)
     return {
         "success": True,
         "data": [RequirementResponse.model_validate(r) for r in requirements],
