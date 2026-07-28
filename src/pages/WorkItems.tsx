@@ -12,11 +12,13 @@ import {
   CheckCircle,
   X,
   Upload,
+  Download,
   Trash2,
   Edit3,
   ChevronDown,
   ChevronRight,
   Sparkles,
+  FolderPlus,
 } from 'lucide-react';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
@@ -76,9 +78,10 @@ export default function WorkItems() {
   
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<WorkItem | null>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
-  
+
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -182,6 +185,60 @@ export default function WorkItems() {
     }
   };
 
+  const handleCreateCategory = async (data: { name: string; code: string; description?: string; icon?: string; color?: string }) => {
+    try {
+      const res = await workItemsAPI.createCategory(data);
+      if (res.success) {
+        setIsCategoryModalOpen(false);
+        fetchCategories();
+      }
+    } catch (err) {
+      console.error('Failed to create category:', err);
+      alert('创建类别失败，请重试');
+    }
+  };
+
+  const handleDeleteCategory = async (id: number) => {
+    if (!confirm('确定要删除这个类别吗？关联的工作项将变为无类别。')) return;
+    try {
+      const res = await workItemsAPI.deleteCategory(id);
+      if (res.success) {
+        fetchCategories();
+        fetchWorkItems();
+      }
+    } catch (err) {
+      console.error('Failed to delete category:', err);
+      alert('删除失败，请重试');
+    }
+  };
+
+  const handleExportTable = () => {
+    const headers = ['类别', '标题', '详情', '紧急度', '重要性', '状态', '优先级分数', '截止日期', '创建时间'];
+    const rows = workItems.map((item) => {
+      const catName = categories.find((c) => c.id === item.category_id)?.name || '';
+      const urgencyMap: Record<string, string> = { na: 'N/A', low: '低', medium: '中', high: '高' };
+      const importanceMap: Record<string, string> = { na: 'N/A', low: '低', medium: '中', high: '高' };
+      const statusMap: Record<string, string> = { pending: '待处理', in_progress: '进行中', completed: '已完成', blocked: '受阻' };
+      return [
+        catName,
+        item.title,
+        item.details || '',
+        urgencyMap[item.urgency] || item.urgency,
+        importanceMap[item.importance] || item.importance,
+        statusMap[item.status] || item.status,
+        item.priority_score.toFixed(1),
+        item.due_date || '',
+        item.created_at || '',
+      ];
+    });
+    const csv = [headers.join('\t'), ...rows.map((r) => r.map((c) => `"${c}"`).join('\t'))].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `work_items_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+  };
+
   const getPriorityScoreColor = (score: number) => {
     if (score >= 8) return 'bg-red-500';
     if (score >= 5) return 'bg-yellow-500';
@@ -200,6 +257,10 @@ export default function WorkItems() {
           <p className="text-sm text-gray-500 mt-1">管理日常工作项目，AI智能规划与提醒</p>
         </div>
         <div className="flex items-center gap-3">
+          <Button variant="secondary" onClick={handleExportTable} disabled={workItems.length === 0}>
+            <Download className="w-4 h-4" />
+            导出表格
+          </Button>
           <Button variant="secondary" onClick={() => setIsImportModalOpen(true)}>
             <Upload className="w-4 h-4" />
             导入表格
@@ -256,7 +317,16 @@ export default function WorkItems() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         <Card className="lg:col-span-1">
           <div className="p-4">
-            <h3 className="font-medium text-gray-800 mb-3">工作类别</h3>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-medium text-gray-800">工作类别</h3>
+              <button
+                onClick={() => setIsCategoryModalOpen(true)}
+                className="p-1.5 text-cyan-600 hover:bg-cyan-50 rounded-lg transition"
+                title="添加类别"
+              >
+                <FolderPlus className="w-4 h-4" />
+              </button>
+            </div>
             <div className="space-y-1">
               <button
                 onClick={() => { setSelectedCategory(null); fetchWorkItems(); }}
@@ -269,21 +339,32 @@ export default function WorkItems() {
               {categories.map((cat) => {
                 const count = workItems.filter((w) => w.category_id === cat.id).length;
                 return (
-                  <button
+                  <div
                     key={cat.id}
-                    onClick={() => { setSelectedCategory(cat.id); fetchWorkItems(); }}
-                    className={`w-full text-left px-3 py-2 rounded-lg transition flex items-center justify-between ${
+                    className={`group w-full text-left px-3 py-2 rounded-lg transition flex items-center justify-between ${
                       selectedCategory === cat.id ? 'bg-cyan-100 text-cyan-700' : 'hover:bg-gray-100 text-gray-700'
                     }`}
                   >
-                    <span className="flex items-center gap-2">
+                    <button
+                      onClick={() => { setSelectedCategory(cat.id); fetchWorkItems(); }}
+                      className="flex items-center gap-2 flex-1"
+                    >
                       <span>{cat.icon}</span>
                       {cat.name}
-                    </span>
-                    <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
-                      {count}
-                    </span>
-                  </button>
+                    </button>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                        {count}
+                      </span>
+                      <button
+                        onClick={() => handleDeleteCategory(cat.id)}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition"
+                        title="删除类别"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -389,6 +470,12 @@ export default function WorkItems() {
         onClose={() => { setIsImportModalOpen(false); setImportedCount(null); }}
         onImport={handleImportTable}
         importedCount={importedCount}
+      />
+
+      <CategoryModal
+        isOpen={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+        onSubmit={handleCreateCategory}
       />
     </div>
   );
@@ -586,9 +673,11 @@ function ImportTableModal({ isOpen, onClose, onImport, importedCount }: ImportTa
         <div className="p-4 bg-cyan-50 rounded-lg">
           <h4 className="font-medium text-cyan-800 mb-2">📋 使用说明</h4>
           <ol className="text-sm text-cyan-700 space-y-1 list-decimal list-inside">
-            <li>从Excel或表格复制工作项内容</li>
-            <li>粘贴到下方文本框（支持Tab分隔或竖线分隔格式）</li>
-            <li>格式：类别 | 项目名 | 详情 | 紧急度 | 重要性</li>
+            <li>可先用"导出表格"下载当前数据作为格式模板</li>
+            <li>从Excel或表格复制工作项内容粘贴到下方</li>
+            <li>支持Tab分隔或竖线分隔格式</li>
+            <li>格式：类别 | 标题 | 详情 | 紧急度 | 重要性</li>
+            <li>紧急度/重要性可选值：high、medium、low、na</li>
           </ol>
         </div>
         <div>
@@ -613,6 +702,119 @@ function ImportTableModal({ isOpen, onClose, onImport, importedCount }: ImportTa
             <Sparkles className="w-4 h-4" />
             AI解析导入
           </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface CategoryModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: (data: { name: string; code: string; description?: string; icon?: string; color?: string }) => void;
+}
+
+function CategoryModal({ isOpen, onClose, onSubmit }: CategoryModalProps) {
+  const [name, setName] = useState('');
+  const [code, setCode] = useState('');
+  const [description, setDescription] = useState('');
+  const [icon, setIcon] = useState('📁');
+  const [color, setColor] = useState('#6B7280');
+
+  useEffect(() => {
+    if (isOpen) {
+      setName('');
+      setCode('');
+      setDescription('');
+      setIcon('📁');
+      setColor('#6B7280');
+    }
+  }, [isOpen]);
+
+  const handleSubmit = () => {
+    if (!name.trim()) {
+      alert('请输入类别名称');
+      return;
+    }
+    if (!code.trim()) {
+      alert('请输入类别编码');
+      return;
+    }
+    onSubmit({
+      name: name.trim(),
+      code: code.trim().toLowerCase().replace(/\s+/g, '_'),
+      description: description.trim() || undefined,
+      icon: icon.trim() || '📁',
+      color: color,
+    });
+  };
+
+  const iconOptions = ['📁', '🔄', '📋', '🔬', '🚀', '🤖', '🔧', '📦', '🔗', '⚡', '🎯', '💡'];
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title="新建工作类别" size="md">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">类别名称 *</label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:border-cyan-500"
+            placeholder="如：测试类别"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">类别编码 *（英文，自动生成）</label>
+          <input
+            type="text"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:border-cyan-500"
+            placeholder="如：test_category"
+          />
+          <p className="text-xs text-gray-400 mt-1">用于唯一标识，仅支持英文和下划线</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+          <input
+            type="text"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:border-cyan-500"
+            placeholder="类别描述（可选）"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">图标</label>
+            <div className="flex flex-wrap gap-2">
+              {iconOptions.map((ic) => (
+                <button
+                  key={ic}
+                  onClick={() => setIcon(ic)}
+                  className={`w-9 h-9 rounded-lg text-lg flex items-center justify-center transition ${
+                    icon === ic ? 'bg-cyan-100 border-2 border-cyan-500' : 'bg-gray-50 border border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  {ic}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">颜色</label>
+            <input
+              type="color"
+              value={color}
+              onChange={(e) => setColor(e.target.value)}
+              className="w-full h-10 bg-gray-50 border border-gray-300 rounded-lg cursor-pointer"
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 pt-4">
+          <Button variant="ghost" onClick={onClose}>取消</Button>
+          <Button onClick={handleSubmit}>创建类别</Button>
         </div>
       </div>
     </Modal>
