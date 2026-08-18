@@ -17,6 +17,7 @@ import Login from '@/pages/Login';
 import WorkItems from '@/pages/WorkItems';
 import WorkDashboard from '@/pages/WorkDashboard';
 import { useAuthStore } from '@/stores/authStore';
+import useAppStore from '@/stores/appStore';
 
 const pageTitles: Record<string, { title: string; subtitle?: string }> = {
   '/': { title: '仪表盘', subtitle: '工作概览与统计' },
@@ -39,6 +40,7 @@ const pageTitles: Record<string, { title: string; subtitle?: string }> = {
 function PageContent() {
   const location = useLocation();
   const path = location.pathname;
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   let pageInfo = pageTitles[path];
 
   if (!pageInfo) {
@@ -47,7 +49,7 @@ function PageContent() {
   }
 
   return (
-    <div className="flex-1 flex flex-col overflow-hidden ml-64">
+    <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ${sidebarCollapsed ? 'ml-[68px]' : 'ml-64'}`}>
       <Header title={pageInfo.title} subtitle={pageInfo.subtitle} />
       <main className="flex-1 overflow-auto p-6">
         <Routes>

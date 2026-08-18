@@ -5,53 +5,43 @@ interface StatsCardProps {
   value: string | number;
   icon: ReactNode;
   trend?: { value: number; label: string };
-  color: 'cyan' | 'green' | 'orange' | 'purple';
+  color: 'brand' | 'emerald' | 'amber' | 'violet';
 }
 
+// 统一到低饱和品牌色系，去掉 scale 放大，只保留 lift 阴影过渡
 const colorStyles = {
-  cyan: {
-    bg: 'bg-cyan-50',
-    icon: 'text-cyan-600',
-    border: 'border-cyan-100',
-  },
-  green: {
-    bg: 'bg-green-50',
-    icon: 'text-green-600',
-    border: 'border-green-100',
-  },
-  orange: {
-    bg: 'bg-orange-50',
-    icon: 'text-orange-600',
-    border: 'border-orange-100',
-  },
-  purple: {
-    bg: 'bg-purple-50',
-    icon: 'text-purple-600',
-    border: 'border-purple-100',
-  },
+  brand: { bg: 'bg-brand-50', icon: 'text-brand-600' },
+  emerald: { bg: 'bg-emerald-50', icon: 'text-emerald-600' },
+  amber: { bg: 'bg-amber-50', icon: 'text-amber-600' },
+  violet: { bg: 'bg-violet-50', icon: 'text-violet-600' },
 };
 
 export default function StatsCard({ title, value, icon, trend, color }: StatsCardProps) {
   const styles = colorStyles[color];
-  
+
   return (
-    <div className={`bg-white border ${styles.border} rounded-xl p-5 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg`}>
+    <div className="bg-white border border-slate-200/80 rounded-xl p-5 shadow-soft transition-all duration-200 hover:shadow-lift hover:border-slate-300">
       <div className="flex items-start justify-between">
-        <div className={`p-3 rounded-lg ${styles.bg}`}>
-          <div className={styles.icon}>{icon}</div>
+        <div className={`p-2.5 rounded-lg ${styles.bg}`}>
+          <div className={`${styles.icon} w-5 h-5`}>{icon}</div>
         </div>
         {trend && (
-          <div className={`flex items-center gap-1 text-xs font-medium ${
-            trend.value >= 0 ? 'text-green-600' : 'text-red-600'
-          }`}>
-            <span>{trend.value >= 0 ? '+' : ''}{trend.value}%</span>
-            <span className="text-gray-500">{trend.label}</span>
+          <div
+            className={`flex items-center gap-1 text-xs font-medium ${
+              trend.value >= 0 ? 'text-emerald-600' : 'text-rose-600'
+            }`}
+          >
+            <span>
+              {trend.value >= 0 ? '+' : ''}
+              {trend.value}%
+            </span>
+            <span className="text-slate-400">{trend.label}</span>
           </div>
         )}
       </div>
       <div className="mt-4">
-        <p className="text-2xl font-bold text-gray-800">{value}</p>
-        <p className="text-sm text-gray-500 mt-1">{title}</p>
+        <p className="text-[26px] font-semibold text-slate-800 tracking-tight leading-none">{value}</p>
+        <p className="text-[13px] text-slate-500 mt-1.5">{title}</p>
       </div>
     </div>
   );

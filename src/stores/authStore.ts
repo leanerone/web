@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import api from '@/services/api';
+import { AUTH_STORAGE_KEY } from '@/utils/constants';
 
 export interface AuthUser {
   username: string;
@@ -26,18 +28,16 @@ interface AuthState {
   clearError: () => void;
 }
 
-const STORAGE_KEY = 'cim_auth';
-
 function loadFromStorage(): { user: AuthUser | null; token: string | null; expiresAt: string | null } {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
     if (!raw) return { user: null, token: null, expiresAt: null };
     const parsed = JSON.parse(raw);
     // 检查是否过期
     if (parsed.expiresAt) {
       const expires = new Date(parsed.expiresAt).getTime();
       if (Date.now() > expires) {
-        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(AUTH_STORAGE_KEY);
         return { user: null, token: null, expiresAt: null };
       }
     }
@@ -52,11 +52,11 @@ function loadFromStorage(): { user: AuthUser | null; token: string | null; expir
 }
 
 function saveToStorage(user: AuthUser, token: string, expiresAt: string) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ user, token, expiresAt }));
+  localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ user, token, expiresAt }));
 }
 
 function clearStorage() {
-  localStorage.removeItem(STORAGE_KEY);
+  localStorage.removeItem(AUTH_STORAGE_KEY);
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -70,8 +70,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   loginWithWindows: async () => {
     set({ isLoading: true, error: null });
     try {
-      const resp = await fetch('/api/auth/windows');
-      const data = await resp.json();
+      const data = await api.get('/auth/windows') as any;
       if (data.success) {
         saveToStorage(data.user, data.token, data.expires_at);
         set({
@@ -94,12 +93,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   loginWithUsername: async (username: string) => {
     set({ isLoading: true, error: null });
     try {
-      const resp = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username }),
-      });
-      const data = await resp.json();
+      const data = await api.post('/auth/login', { username }) as any;
       if (data.success) {
         saveToStorage(data.user, data.token, data.expires_at);
         set({

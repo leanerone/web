@@ -12,17 +12,9 @@ import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { useNavigate } from 'react-router-dom';
 import { equipmentAPI } from '@/services/api';
+import { mockEquipment } from '@/utils/mockData';
 import useAppStore from '@/stores/appStore';
 import type { Equipment } from '@/types';
-
-const mockEquipment: Equipment[] = [
-  { id: 1, ap_id: 1, ap_name: 'AP-001', eq_name: 'CATEOX-57', eq_type: 'CPC', eq_model: 'KEDJ-8350V-LPT', vendor: 'ASML', server_id: 'SRV-001', driver_type: 'TCP/IP', driver_version: 'v3.2.1', snmp_ip: '192.168.1.101', snmp_port: '161', driver1_ip: '192.168.1.101', driver1_port: '5000', driver2_ip: '', driver2_port: '', area: 'DF', baud_rate: '', status: 'online', location: 'Fab-A-1F-Bay01', installed_at: '2025-06-15', updated_at: '2026-07-13' },
-  { id: 2, ap_id: 2, ap_name: 'AP-002', eq_name: 'GATEOX-57', eq_type: 'GATEOX', eq_model: 'KEDJ-82800S', vendor: 'TEL', server_id: 'SRV-002', driver_type: 'TCP/IP', driver_version: 'v3.2.1', snmp_ip: '192.168.1.102', snmp_port: '161', driver1_ip: '192.168.1.102', driver1_port: '5001', driver2_ip: '', driver2_port: '', area: 'TF', baud_rate: '', status: 'online', location: 'Fab-A-1F-Bay02', installed_at: '2025-08-20', updated_at: '2026-07-13' },
-  { id: 3, ap_id: 3, ap_name: 'AP-003', eq_name: 'CPC-55', eq_type: 'CPC', eq_model: 'DNSA8S2000', vendor: 'DNS', server_id: 'SRV-003', driver_type: 'TCP/IP', driver_version: 'v2.1.0', snmp_ip: '192.168.1.103', snmp_port: '161', driver1_ip: '192.168.1.103', driver1_port: '5002', driver2_ip: '', driver2_port: '', area: 'TF', baud_rate: '', status: 'maintenance', location: 'Fab-B-2F-Bay05', installed_at: '2024-12-01', updated_at: '2026-07-12' },
-  { id: 4, ap_id: 4, ap_name: 'AP-004', eq_name: 'TTOX-54', eq_type: 'TTOX', eq_model: 'Thermawave OP5205T', vendor: 'Thermawave', server_id: 'SRV-004', driver_type: 'TCP/IP', driver_version: 'v4.0.0', snmp_ip: '192.168.1.104', snmp_port: '161', driver1_ip: '192.168.1.104', driver1_port: '5003', driver2_ip: '', driver2_port: '', area: 'FF', baud_rate: '', status: 'online', location: 'Fab-C-3F-Bay03', installed_at: '2025-03-10', updated_at: '2026-07-13' },
-  { id: 5, ap_id: 5, ap_name: 'AP-005', eq_name: 'CATEOX-58', eq_type: 'CPC', eq_model: 'KEDJ-8350V-LPT', vendor: 'ASML', server_id: 'SRV-005', driver_type: 'TCP/IP', driver_version: 'v3.2.1', snmp_ip: '192.168.1.105', snmp_port: '161', driver1_ip: '192.168.1.105', driver1_port: '5004', driver2_ip: '', driver2_port: '', area: 'DF', baud_rate: '', status: 'online', location: 'Fab-A-1F-Bay03', installed_at: '2025-07-01', updated_at: '2026-07-13' },
-  { id: 6, ap_id: 6, ap_name: 'AP-006', eq_name: 'GATEOX-58', eq_type: 'GATEOX', eq_model: 'KEDJ-82800S', vendor: 'TEL', server_id: 'SRV-006', driver_type: 'TCP/IP', driver_version: 'v3.2.1', snmp_ip: '192.168.1.106', snmp_port: '161', driver1_ip: '192.168.1.106', driver1_port: '5005', driver2_ip: '', driver2_port: '', area: 'TF', baud_rate: '', status: 'offline', location: 'Fab-A-1F-Bay04', installed_at: '2025-09-15', updated_at: '2026-07-10' },
-];
 
 export default function Equipment() {
   const navigate = useNavigate();

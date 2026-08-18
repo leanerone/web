@@ -15,6 +15,7 @@ import StatsCard from '@/components/StatsCard';
 import Button from '@/components/Button';
 import { useNavigate } from 'react-router-dom';
 import { dashboardAPI, projectAPI, requirementAPI, equipmentAPI } from '@/services/api';
+import { mockEquipment, mockRequirements } from '@/utils/mockData';
 import useAppStore from '@/stores/appStore';
 import type { DashboardStats, Project, Requirement, Equipment } from '@/types';
 
@@ -33,17 +34,6 @@ const mockProjects: Project[] = [
   { id: 1, name: 'EAP系统升级v2.0', description: '升级现有EAP系统至新版本', status: 'active', start_date: '2026-01-15', end_date: '2026-06-30', progress: 75, created_at: '2026-01-15', updated_at: '2026-07-13' },
   { id: 2, name: 'Litho机台驱动优化', description: '优化光刻机关键驱动性能', status: 'active', start_date: '2026-03-01', end_date: '2026-08-31', progress: 45, created_at: '2026-03-01', updated_at: '2026-07-13' },
   { id: 3, name: 'CMP设备集成', description: '集成新CMP设备至CIM系统', status: 'active', start_date: '2026-05-01', end_date: '2026-11-30', progress: 20, created_at: '2026-05-01', updated_at: '2026-07-13' },
-];
-
-const mockRequirements: Requirement[] = [
-  { id: 1, title: 'Lot Tracking功能增强', description: '增加Lot实时追踪功能', priority: 'high', status: 'pending', equipment_id: 1, created_at: '2026-07-10', updated_at: '2026-07-10' },
-  { id: 2, title: 'EPI机台参数调整', description: '调整EPI机台工艺参数配置', priority: 'medium', status: 'in_progress', equipment_id: 2, created_at: '2026-07-08', updated_at: '2026-07-12' },
-  { id: 3, title: 'WAT数据采集优化', description: '优化WAT测试数据采集效率', priority: 'high', status: 'pending', equipment_id: 3, created_at: '2026-07-11', updated_at: '2026-07-11' },
-];
-
-const mockEquipment: Equipment[] = [
-  { id: 1, type_id: 1, name: 'LITHO-001', location: 'Fab-A-1F', status: 'online', driver_version: 'v3.2.1', installed_at: '2025-06-15', updated_at: '2026-07-13' },
-  { id: 2, type_id: 2, name: 'EPI-005', location: 'Fab-B-2F', status: 'maintenance', driver_version: 'v2.1.0', installed_at: '2024-12-01', updated_at: '2026-07-12' },
 ];
 
 const aiSuggestions = [
@@ -138,27 +128,27 @@ export default function Dashboard() {
                 title="项目总数"
                 value={stats.total_projects}
                 icon={<FolderKanban className="w-6 h-6" />}
-                color="cyan"
+                color="brand"
                 trend={{ value: 12, label: '较上周' }}
               />
               <StatsCard
                 title="机台数量"
                 value={stats.total_equipment}
                 icon={<Cpu className="w-6 h-6" />}
-                color="green"
+                color="emerald"
                 trend={{ value: 5, label: '较上月' }}
               />
               <StatsCard
                 title="待处理需求"
                 value={stats.pending_requirements}
                 icon={<ClipboardList className="w-6 h-6" />}
-                color="orange"
+                color="amber"
               />
               <StatsCard
                 title="本周任务完成率"
                 value={`${stats.completion_rate}%`}
                 icon={<CheckCircle2 className="w-6 h-6" />}
-                color="purple"
+                color="violet"
                 trend={{ value: stats.completion_rate - 80, label: '目标' }}
               />
             </div>
@@ -273,8 +263,8 @@ export default function Dashboard() {
                     <tbody>
                       {equipment.slice(0, 5).map((item) => (
                         <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                          <td className="py-3 px-4 text-sm text-gray-800">{item.name}</td>
-                          <td className="py-3 px-4 text-sm text-gray-500">{item.type?.name || '未知机型'}</td>
+                          <td className="py-3 px-4 text-sm text-gray-800">{item.eq_name}</td>
+                          <td className="py-3 px-4 text-sm text-gray-500">{item.eq_type}</td>
                           <td className="py-3 px-4 text-sm text-gray-500">{item.location}</td>
                           <td className="py-3 px-4 text-sm text-gray-500">{item.driver_version}</td>
                           <td className="py-3 px-4">

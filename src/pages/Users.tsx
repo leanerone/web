@@ -14,6 +14,7 @@ import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
 import { userAPI } from '@/services/api';
+import { getRoleLabel, getRoleColor } from '@/utils/constants';
 import type { User } from '@/types';
 
 export default function UserManagement() {
@@ -116,24 +117,6 @@ export default function UserManagement() {
       console.error('Failed to delete user:', err);
       alert('删除失败，请重试');
     }
-  };
-
-  const getRoleLabel = (role: string) => {
-    const labels: Record<string, string> = {
-      admin: '管理员',
-      engineer: '工程师',
-      user: '普通用户',
-    };
-    return labels[role] || role;
-  };
-
-  const getRoleColor = (role: string) => {
-    const colors: Record<string, string> = {
-      admin: 'bg-red-50 text-red-600',
-      engineer: 'bg-blue-50 text-blue-600',
-      user: 'bg-gray-100 text-gray-600',
-    };
-    return colors[role] || 'bg-gray-100 text-gray-600';
   };
 
   const getStatusLabel = (status: string) => {
