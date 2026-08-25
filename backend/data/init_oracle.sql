@@ -5,7 +5,7 @@
 -- 执行方式: 打开本文件 -> 连接目标Oracle实例 -> 整文件"执行" (F5)
 --
 -- ╔════════════════════════════════════════════════════════════════════════╗
--- ║  【量产部署方案 - PANJOB 账号直连】                                    ║
+-- ║  【量产部署方案 - PANJOB 账号直连 v1.4】                                ║
 -- ║                                                                        ║
 -- ║  · 登录账号: PANJOB (与 EQUIPMENTINFO 同账号)                          ║
 -- ║  · 机台主表 EQUIPMENTINFO 已存在且为生产数据，本脚本【绝不创建/修改】!  ║
@@ -15,46 +15,35 @@
 -- ║      CHANGE_RECORDS / REPORTS / NOTES_DOCUMENTS /                     ║
 -- ║      USERS / SYSTEM_SETTINGS / WORK_CATEGORIES / WORK_ITEMS /          ║
 -- ║      DAILY_PLANS / WORK_LOGS                                           ║
--- ║  · 自增列: SEQUENCE + TRIGGER (兼容 Oracle 11g/12c, 无需 IDENTITY)    ║
--- ║  · 外键 CONFIGURATIONS.EQUIPMENT_NAME / REQUIREMENTS.EQUIPMENT_NAME   ║
--- ║    引用 EQUIPMENTINFO.EQUIPMENT (VARCHAR2 主键)                        ║
--- ║  · 不创建 EQUIPMENT_TYPES 视图 (避免 CREATE VIEW 权限依赖)            ║
--- ║    前端类型下拉从机台列表前端去重, 后端 /types 从 EQUIPMENTINFO 去重   ║
+-- ║  · 自增列: SEQUENCE + TRIGGER (显式 SQL, 非PL/SQL循环, 兼容 ROLE 授权) ║
+-- ║  · 不建外键指向 EQUIPMENTINFO (生产表 EQUIPMENT 无 PK/UNIQUE 约束),    ║
+-- ║    EQUIPMENT_NAME 只建普通索引, 后端应用层校验存在性                    ║
+-- ║  · 不使用 PRINT, 不使用 IDENTITY, 不使用 CREATE VIEW                   ║
 -- ║                                                                        ║
 -- ║  · 单步部署：本脚本执行完毕即可启动后端，无需第二步!                   ║
 -- ║  · 禁止在已有业务数据的环境下重复执行本脚本！DROP 段会清空所有表。     ║
 -- ╚════════════════════════════════════════════════════════════════════════╝
---
--- 注意事项:
---   1. 执行前请确认已用 PANJOB 账号登录 (脚本段 0 会自检)
---   2. 所有 CREATE TABLE 不指定 TABLESPACE，自动落在 PANJOB 默认表空间
---   3. 本脚本不使用 PRINT 语句 (Oracle 不支持), 用 SELECT ... FROM DUAL 提示
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
 -- 0. 执行环境自检
 -- ----------------------------------------------------------------------------
--- 显示当前登录用户与实例
 SELECT USER         AS CUR_USER,
        SYS_CONTEXT('USERENV','INSTANCE_NAME') AS INST_NAME,
        SYS_CONTEXT('USERENV','SERVICE_NAME')  AS SVC_NAME
   FROM DUAL
 GO
-
 SELECT '若上面 CUR_USER 不是 PANJOB，请中止并切换连接!' AS MSG FROM DUAL
 GO
-
--- 确认 EQUIPMENTINFO 表存在于当前用户下
 SELECT COUNT(*) AS EQUIPMENTINFO_ROWS FROM EQUIPMENTINFO
 GO
-
 SELECT '若上面 EQUIPMENTINFO_ROWS = 0 或报 ORA-00942, 请中止: 当前账号无 EQUIPMENTINFO 表!' AS MSG FROM DUAL
 GO
 
 -- ----------------------------------------------------------------------------
--- 1. DROP TABLES / SEQUENCES / TRIGGERS (级联删除, 按外键依赖顺序)
---    PL/SQL 动态 DROP: 对象不存在时不报错 (避免首次执行被 ORA-00942 中断)
+-- 1. DROP 既有业务表 + SEQUENCE + TRIGGER (PL/SQL 动态 DROP, 不存在不报错)
 --    ⚠️ 严禁 DROP EQUIPMENTINFO! 列表中绝无 'EQUIPMENTINFO'
+--    DROP 用 PL/SQL 没问题 (DROP 通过 ROLE 权限可执行, CREATE 才需要 DIRECT GRANT)
 -- ----------------------------------------------------------------------------
 DECLARE
   TYPE t_arr IS TABLE OF VARCHAR2(30);
@@ -85,9 +74,7 @@ END;
 GO
 
 -- ----------------------------------------------------------------------------
--- 2. CREATE TABLES — 13 张业务表全部创建在 PANJOB 下 (与 EQUIPMENTINFO 同表空间)
---    不指定 TABLESPACE，使用 PANJOB 默认表空间。
---    ID 列: NUMBER(10) PRIMARY KEY (自增由段 2.15 的 SEQUENCE+TRIGGER 实现)
+-- 2. CREATE TABLES — 13 张业务表 (不指定 TABLESPACE, 不使用 IDENTITY, 不建指向 EQUIPMENTINFO 的外键)
 -- ----------------------------------------------------------------------------
 
 -- 2.1 PROJECTS - 项目表
@@ -104,25 +91,25 @@ CREATE TABLE PROJECTS (
     CONSTRAINT CHK_PROJECTS_STATUS CHECK (STATUS IN ('active','completed','paused','cancelled'))
 )
 GO
-COMMENT ON TABLE  PROJECTS              IS '项目管理表'
+COMMENT ON TABLE  PROJECTS             IS '项目管理表'
 GO
-COMMENT ON COLUMN PROJECTS.ID           IS '主键ID'
+COMMENT ON COLUMN PROJECTS.ID          IS '主键ID'
 GO
-COMMENT ON COLUMN PROJECTS.NAME         IS '项目名称'
+COMMENT ON COLUMN PROJECTS.NAME        IS '项目名称'
 GO
-COMMENT ON COLUMN PROJECTS.DESCRIPTION  IS '项目描述'
+COMMENT ON COLUMN PROJECTS.DESCRIPTION IS '项目描述'
 GO
-COMMENT ON COLUMN PROJECTS.STATUS       IS '项目状态: active活跃/completed已完成/paused暂停/cancelled取消'
+COMMENT ON COLUMN PROJECTS.STATUS      IS '项目状态: active活跃/completed已完成/paused暂停/cancelled取消'
 GO
-COMMENT ON COLUMN PROJECTS.START_DATE   IS '开始日期'
+COMMENT ON COLUMN PROJECTS.START_DATE  IS '开始日期'
 GO
-COMMENT ON COLUMN PROJECTS.END_DATE     IS '结束日期'
+COMMENT ON COLUMN PROJECTS.END_DATE    IS '结束日期'
 GO
-COMMENT ON COLUMN PROJECTS.PROGRESS     IS '完成进度百分比 0~100'
+COMMENT ON COLUMN PROJECTS.PROGRESS    IS '完成进度百分比 0~100'
 GO
-COMMENT ON COLUMN PROJECTS.CREATED_AT   IS '创建时间'
+COMMENT ON COLUMN PROJECTS.CREATED_AT  IS '创建时间'
 GO
-COMMENT ON COLUMN PROJECTS.UPDATED_AT   IS '更新时间'
+COMMENT ON COLUMN PROJECTS.UPDATED_AT  IS '更新时间'
 GO
 CREATE INDEX IDX_PROJECTS_STATUS ON PROJECTS(STATUS)
 GO
@@ -156,20 +143,21 @@ GO
 CREATE INDEX IDX_TASKS_STATUS     ON TASKS(STATUS)
 GO
 
--- 2.3 CONFIGURATIONS - 机台配置项表 (外键引用 EQUIPMENTINFO.EQUIPMENT)
+-- 2.3 CONFIGURATIONS - 机台配置项表
+--     注: 不建外键指向 EQUIPMENTINFO (生产表 EQUIPMENT 列可能无 PK/UNIQUE 约束, 建 FK 会报 ORA-02270)
+--     EQUIPMENT_NAME 只建普通索引, 后端应用层校验存在性
 CREATE TABLE CONFIGURATIONS (
     ID              NUMBER(10)    PRIMARY KEY,
     EQUIPMENT_NAME  VARCHAR2(32 CHAR),
     CONFIG_KEY      VARCHAR2(100 CHAR) NOT NULL,
     CONFIG_VALUE    CLOB,
     VERSION         VARCHAR2(20 CHAR),
-    APPLIED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
-    CONSTRAINT FK_CONFIG_EQUIPMENT FOREIGN KEY (EQUIPMENT_NAME) REFERENCES EQUIPMENTINFO(EQUIPMENT) ON DELETE CASCADE
+    APPLIED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP
 )
 GO
-COMMENT ON TABLE  CONFIGURATIONS             IS '机台配置项历史表 (外键指向量产表 EQUIPMENTINFO)'
+COMMENT ON TABLE  CONFIGURATIONS             IS '机台配置项历史表 (EQUIPMENT_NAME 不建外键, 后端应用层校验)'
 GO
-COMMENT ON COLUMN CONFIGURATIONS.EQUIPMENT_NAME IS '机台编号 (= EQUIPMENTINFO.EQUIPMENT)'
+COMMENT ON COLUMN CONFIGURATIONS.EQUIPMENT_NAME IS '机台编号 (对应 EQUIPMENTINFO.EQUIPMENT, 无外键)'
 GO
 COMMENT ON COLUMN CONFIGURATIONS.CONFIG_KEY  IS '配置项键名'
 GO
@@ -180,7 +168,7 @@ GO
 CREATE INDEX IDX_CONFIG_KEY            ON CONFIGURATIONS(CONFIG_KEY)
 GO
 
--- 2.4 REQUIREMENTS - 需求表 (外键引用 EQUIPMENTINFO.EQUIPMENT)
+-- 2.4 REQUIREMENTS - 需求表 (EQUIPMENT_NAME 不建外键, 同上)
 CREATE TABLE REQUIREMENTS (
     ID              NUMBER(10)    PRIMARY KEY,
     TITLE           VARCHAR2(200 CHAR) NOT NULL,
@@ -193,8 +181,7 @@ CREATE TABLE REQUIREMENTS (
     UPDATED_AT      TIMESTAMP,
     CONSTRAINT CHK_REQ_PRIORITY CHECK (PRIORITY IN ('low','medium','high','critical')),
     CONSTRAINT CHK_REQ_STATUS   CHECK (STATUS   IN ('pending','in_progress','testing','completed','rejected')),
-    CONSTRAINT FK_REQ_PROJECT   FOREIGN KEY (PROJECT_ID)     REFERENCES PROJECTS(ID)        ON DELETE SET NULL,
-    CONSTRAINT FK_REQ_EQUIPMENT FOREIGN KEY (EQUIPMENT_NAME) REFERENCES EQUIPMENTINFO(EQUIPMENT) ON DELETE SET NULL
+    CONSTRAINT FK_REQ_PROJECT   FOREIGN KEY (PROJECT_ID) REFERENCES PROJECTS(ID) ON DELETE SET NULL
 )
 GO
 COMMENT ON TABLE  REQUIREMENTS               IS '需求管理表'
@@ -203,7 +190,7 @@ COMMENT ON COLUMN REQUIREMENTS.PRIORITY      IS '需求优先级: low低/medium�
 GO
 COMMENT ON COLUMN REQUIREMENTS.STATUS        IS '需求状态: pending待处理/in_progress进行中/testing测试中/completed已完成/rejected已拒绝'
 GO
-COMMENT ON COLUMN REQUIREMENTS.EQUIPMENT_NAME IS '机台编号 (= EQUIPMENTINFO.EQUIPMENT)'
+COMMENT ON COLUMN REQUIREMENTS.EQUIPMENT_NAME IS '机台编号 (对应 EQUIPMENTINFO.EQUIPMENT, 无外键)'
 GO
 CREATE INDEX IDX_REQ_PROJECT_ID     ON REQUIREMENTS(PROJECT_ID)
 GO
@@ -211,7 +198,7 @@ CREATE INDEX IDX_REQ_EQUIPMENT_NAME ON REQUIREMENTS(EQUIPMENT_NAME)
 GO
 CREATE INDEX IDX_REQ_STATUS         ON REQUIREMENTS(STATUS)
 GO
-CREATE INDEX IDX_REQ_PRIORITY        ON REQUIREMENTS(PRIORITY)
+CREATE INDEX IDX_REQ_PRIORITY       ON REQUIREMENTS(PRIORITY)
 GO
 
 -- 2.5 CHANGE_RECORDS - 需求变更记录表
@@ -225,11 +212,11 @@ CREATE TABLE CHANGE_RECORDS (
     CONSTRAINT FK_CHANGE_REQ FOREIGN KEY (REQUIREMENT_ID) REFERENCES REQUIREMENTS(ID) ON DELETE CASCADE
 )
 GO
-COMMENT ON TABLE  CHANGE_RECORDS              IS '需求变更记录/修改历史'
+COMMENT ON TABLE  CHANGE_RECORDS             IS '需求变更记录/修改历史'
 GO
-COMMENT ON COLUMN CHANGE_RECORDS.CHANGE_TYPE  IS '变更类型，如 modify/delete/add'
+COMMENT ON COLUMN CHANGE_RECORDS.CHANGE_TYPE IS '变更类型，如 modify/delete/add'
 GO
-COMMENT ON COLUMN CHANGE_RECORDS.FILE_PATH    IS '关联代码/配置文件路径'
+COMMENT ON COLUMN CHANGE_RECORDS.FILE_PATH   IS '关联代码/配置文件路径'
 GO
 CREATE INDEX IDX_CHANGE_REQ_ID ON CHANGE_RECORDS(REQUIREMENT_ID)
 GO
@@ -273,7 +260,7 @@ GO
 CREATE INDEX IDX_NOTES_PROJECT_ID ON NOTES_DOCUMENTS(PROJECT_ID)
 GO
 
--- 2.8 USERS - 用户表
+-- 2.8 USERS - 用户表 (UNIQUE 约束自动建索引, 不再重复 CREATE INDEX)
 CREATE TABLE USERS (
     ID              NUMBER(10)    PRIMARY KEY,
     USERNAME        VARCHAR2(100 CHAR) NOT NULL,
@@ -294,14 +281,13 @@ COMMENT ON COLUMN USERS.USERNAME     IS '登录账号(唯一)'
 GO
 COMMENT ON COLUMN USERS.DISPLAY_NAME IS '显示名称'
 GO
-COMMENT ON COLUMN USERS.ROLE         IS '角色: admin/engineer/user'
+COMMENT ON COLUMN USERS.ROLE          IS '角色: admin/engineer/user'
 GO
 COMMENT ON COLUMN USERS.STATUS       IS '账号状态: active启用/inactive禁用'
 GO
-CREATE INDEX IDX_USERS_USERNAME ON USERS(USERNAME)
-GO
+-- 注: IDX_USERS_USERNAME 已由 UNIQUE 约束自动创建, 不再重复建索引
 
--- 2.9 SYSTEM_SETTINGS - 系统设置表
+-- 2.9 SYSTEM_SETTINGS - 系统设置表 (UNIQUE 自动建索引, 不再重复)
 CREATE TABLE SYSTEM_SETTINGS (
     ID              NUMBER(10)    PRIMARY KEY,
     KEY             VARCHAR2(100 CHAR) NOT NULL,
@@ -318,12 +304,11 @@ COMMENT ON COLUMN SYSTEM_SETTINGS.KEY      IS '配置键名(唯一)'
 GO
 COMMENT ON COLUMN SYSTEM_SETTINGS.CATEGORY IS '配置分类: general/ai/notes/equipment'
 GO
-CREATE INDEX IDX_SYS_SETTINGS_KEY      ON SYSTEM_SETTINGS(KEY)
-GO
 CREATE INDEX IDX_SYS_SETTINGS_CATEGORY ON SYSTEM_SETTINGS(CATEGORY)
 GO
+-- 注: IDX_SYS_SETTINGS_KEY 已由 UNIQUE 约束自动创建
 
--- 2.10 WORK_CATEGORIES - 工作类别表
+-- 2.10 WORK_CATEGORIES - 工作类别表 (UNIQUE 自动建索引, 不再重复)
 CREATE TABLE WORK_CATEGORIES (
     ID              NUMBER(10)    PRIMARY KEY,
     NAME            VARCHAR2(100 CHAR) NOT NULL,
@@ -344,8 +329,7 @@ COMMENT ON COLUMN WORK_CATEGORIES.SORT_ORDER IS '显示排序序号'
 GO
 COMMENT ON COLUMN WORK_CATEGORIES.COLOR      IS '前端标签颜色(HEX)'
 GO
-CREATE INDEX IDX_WORK_CATEGORIES_CODE ON WORK_CATEGORIES(CODE)
-GO
+-- 注: IDX_WORK_CATEGORIES_CODE 已由 UNIQUE 约束自动创建
 
 -- 2.11 WORK_ITEMS - 工作项表
 CREATE TABLE WORK_ITEMS (
@@ -427,139 +411,216 @@ COMMENT ON TABLE  WORK_LOGS           IS '工作管理-工作项操作变更日�
 GO
 COMMENT ON COLUMN WORK_LOGS.ACTION    IS '操作动作: create/update/delete/status_change'
 GO
-CREATE INDEX IDX_WORKLOG_ITEM_ID   ON WORK_LOGS(WORK_ITEM_ID)
+CREATE INDEX IDX_WORKLOG_ITEM_ID ON WORK_LOGS(WORK_ITEM_ID)
 GO
-CREATE INDEX IDX_WORKLOG_CREATED   ON WORK_LOGS(CREATED_AT)
-GO
-
--- 2.14 批量创建 SEQUENCE + TRIGGER (替代 IDENTITY, 兼容 Oracle 11g/12c)
---     13 张表各一套, 用 PL/SQL 循环批量创建, 紧凑高效
-DECLARE
-  TYPE t_arr IS TABLE OF VARCHAR2(30);
-  v_tabs t_arr := t_arr(
-    'PROJECTS','TASKS','CONFIGURATIONS','REQUIREMENTS','CHANGE_RECORDS',
-    'REPORTS','NOTES_DOCUMENTS','USERS','SYSTEM_SETTINGS','WORK_CATEGORIES',
-    'WORK_ITEMS','DAILY_PLANS','WORK_LOGS'
-  );
-  v_seq VARCHAR2(40);
-  v_trg VARCHAR2(40);
-  v_sql VARCHAR2(1000);
-BEGIN
-  FOR i IN 1..v_tabs.COUNT LOOP
-    v_seq := 'SEQ_' || v_tabs(i) || '_ID';
-    v_sql := 'CREATE SEQUENCE ' || v_seq || ' START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE';
-    EXECUTE IMMEDIATE v_sql;
-
-    v_trg := 'TRG_' || v_tabs(i) || '_BI';
-    v_sql := 'CREATE OR REPLACE TRIGGER ' || v_trg ||
-             ' BEFORE INSERT ON ' || v_tabs(i) ||
-             ' FOR EACH ROW WHEN (NEW.ID IS NULL) BEGIN SELECT ' || v_seq ||
-             '.NEXTVAL INTO :NEW.ID FROM DUAL; END;';
-    EXECUTE IMMEDIATE v_sql;
-  END LOOP;
-  COMMIT;
-END;
+CREATE INDEX IDX_WORKLOG_CREATED ON WORK_LOGS(CREATED_AT)
 GO
 
--- ----------------------------------------------------------------------------
--- 3. INSERT INIT DATA - 初始化基础数据
--- ----------------------------------------------------------------------------
--- ⚠️ 不插入任何机台数据: EQUIPMENTINFO 已是生产真实数据，直接展示即可。
---    以下只插入业务基础数据 (项目/任务/需求/用户/系统设置/工作类别)。
---    INSERT 不指定 ID 列, TRIGGER 会自动从 SEQUENCE 取 NEXTVAL 填充。
+-- ============================================================================
+-- 3. CREATE SEQUENCES + TRIGGERS  (显式 SQL, 非PL/SQL循环)
+--    关键: PL/SQL 块内的 DDL 需要 DIRECT GRANT (不能通过 ROLE), 显式 SQL 通过 ROLE 即可
+--    每张表一对, 共 13 对, 全部用显式 CREATE 语句, ADS F5 可直接执行
+-- ============================================================================
 
--- 3.1 项目 PROJECTS (5个 — 业务种子数据)
-INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('机台驱动升级项目', '升级所有机台的驱动版本',        65.0)
+-- 3.1 PROJECTS
+CREATE SEQUENCE SEQ_PROJECTS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
 GO
-INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('CIM系统优化',     '优化CIM系统性能',               40.0)
-GO
-INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('新项目设备接入',  '新项目设备接入CIM系统',         25.0)
-GO
-INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('自动化测试框架',  '建立自动化测试框架',             80.0)
-GO
-INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('数据采集系统',    '升级数据采集系统',               50.0)
+CREATE OR REPLACE TRIGGER TRG_PROJECTS_BI
+  BEFORE INSERT ON PROJECTS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_PROJECTS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
 GO
 
--- 3.2 任务 TASKS (8条 — 业务种子数据)
-INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (1, '光刻机驱动开发',     'high')
+-- 3.2 TASKS
+CREATE SEQUENCE SEQ_TASKS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
 GO
-INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (1, '刻蚀机驱动测试',     'medium')
-GO
-INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (2, '数据库性能调优',     'high')
-GO
-INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (2, 'API接口优化',        'medium')
-GO
-INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (3, '新设备调研',         'medium')
-GO
-INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (4, '测试用例编写',       'medium')
-GO
-INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (4, '测试框架部署',       'high')
-GO
-INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (5, '数据采集脚本开发',   'high')
+CREATE OR REPLACE TRIGGER TRG_TASKS_BI
+  BEFORE INSERT ON TASKS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_TASKS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
 GO
 
--- 3.3 需求 REQUIREMENTS (5条 — 业务种子数据)
---     示例: 关联到 EQUIPMENTINFO.EQUIPMENT 中真实存在的机台编号 (执行人按实际修改)
-INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('机台A驱动升级',   '将机台A的驱动从v1升级到v2',       'high',     1)
+-- 3.3 CONFIGURATIONS
+CREATE SEQUENCE SEQ_CONFIGURATIONS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
 GO
-INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('新增机台配置项',   '为机台新增配置项支持',             'medium',   1)
-GO
-INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('机台B上线',       '新机台B上线部署',                 'critical', 3)
-GO
-INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('报表功能优化',    '优化现有报表功能',                 'low',      2)
-GO
-INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('系统告警优化',    '优化系统告警机制',                 'medium',   2)
+CREATE OR REPLACE TRIGGER TRG_CONFIGURATIONS_BI
+  BEFORE INSERT ON CONFIGURATIONS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_CONFIGURATIONS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
 GO
 
--- 3.4 用户 USERS (3个默认用户)
-INSERT INTO USERS (USERNAME, DISPLAY_NAME, EMAIL, ROLE, DEPARTMENT, TEAM) VALUES ('administrator', '管理员',   'admin@company.com', 'admin',      'IT',   'CIM')
+-- 3.4 REQUIREMENTS
+CREATE SEQUENCE SEQ_REQUIREMENTS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
 GO
-INSERT INTO USERS (USERNAME, DISPLAY_NAME, EMAIL, ROLE, DEPARTMENT, TEAM) VALUES ('eap.engineer',  'EAP工程师', 'eap@company.com',   'engineer',   '制造', 'EAP')
-GO
-INSERT INTO USERS (USERNAME, DISPLAY_NAME, EMAIL, ROLE, DEPARTMENT, TEAM) VALUES ('cim.user',      'CIM用户',  'cim@company.com',   'user',       '制造', 'CIM')
-GO
-
--- 3.5 系统设置 SYSTEM_SETTINGS (general/ai/notes/equipment 9项默认值)
-INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('system_name',       'CIM Work Manager',                 '系统名称',                  'general')
-GO
-INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('openai_api_key',    '',                                  'OpenAI API Key',            'ai')
-GO
-INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('openai_api_base',   'https://api.openai.com/v1',         'OpenAI API Base URL',       'ai')
-GO
-INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('ai_model',          'gpt-4o-mini',                       'AI Model Name',             'ai')
-GO
-INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('notes_server_url',  '',                                  'HCL Notes Server URL',      'notes')
-GO
-INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('notes_user',        '',                                  'HCL Notes Username',        'notes')
-GO
-INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('notes_password',    '',                                  'HCL Notes Password',        'notes')
-GO
--- Git Source 配置 (前端 🐙 按钮跳转用)
-INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('git_source_base_url', 'https://github.com/leanerone/web/blob/main/equipment', 'Git 源码基础 URL', 'equipment')
-GO
-INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('git_source_map', '{"1":"cpc/asm_eagle","2":"pecvd/asm_trident","3":"gateox/tel_8280","4":"tteox/thermawave_op5205t","5":"cateox/asml_8350"}', 'SOURCECODE→Git子路径映射(JSON)', 'equipment')
+CREATE OR REPLACE TRIGGER TRG_REQUIREMENTS_BI
+  BEFORE INSERT ON REQUIREMENTS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_REQUIREMENTS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
 GO
 
--- 3.6 工作类别 WORK_CATEGORIES (8个字典)
-INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Operation/Follow up', 'operation',    '日常操作跟进',     '🔄', '#3B82F6', 1)
+-- 3.5 CHANGE_RECORDS
+CREATE SEQUENCE SEQ_CHANGE_RECORDS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
 GO
-INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Requirement',         'requirement',  '需求跟进与管理',   '📋', '#8B5CF6', 2)
+CREATE OR REPLACE TRIGGER TRG_CHANGE_RECORDS_BI
+  BEFORE INSERT ON CHANGE_RECORDS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_CHANGE_RECORDS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
 GO
-INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('SIT',                 'sit',          '系统集成测试',     '🔬', '#06B6D4', 3)
+
+-- 3.6 REPORTS
+CREATE SEQUENCE SEQ_REPORTS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
 GO
-INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Place then GO',       'place_then_go','上线部署跟踪',     '🚀', '#10B981', 4)
+CREATE OR REPLACE TRIGGER TRG_REPORTS_BI
+  BEFORE INSERT ON REPORTS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_REPORTS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
 GO
-INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('AI开发',              'ai_dev',       'AI项目开发与部署', '🤖', '#F59E0B', 5)
+
+-- 3.7 NOTES_DOCUMENTS
+CREATE SEQUENCE SEQ_NOTES_DOCUMENTS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
 GO
-INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('RCMS',                'rcms',         'RCMS系统测试',     '🔧', '#EF4444', 6)
+CREATE OR REPLACE TRIGGER TRG_NOTES_DOCUMENTS_BI
+  BEFORE INSERT ON NOTES_DOCUMENTS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_NOTES_DOCUMENTS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
 GO
-INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Other',               'other',        '其他工作',         '📦', '#6B7280', 7)
+
+-- 3.8 USERS
+CREATE SEQUENCE SEQ_USERS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
 GO
-INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('System HandOver',     'handover',     '系统交接',         '🔗', '#EC4899', 8)
+CREATE OR REPLACE TRIGGER TRG_USERS_BI
+  BEFORE INSERT ON USERS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_USERS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
+GO
+
+-- 3.9 SYSTEM_SETTINGS
+CREATE SEQUENCE SEQ_SYSTEM_SETTINGS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
+GO
+CREATE OR REPLACE TRIGGER TRG_SYSTEM_SETTINGS_BI
+  BEFORE INSERT ON SYSTEM_SETTINGS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_SYSTEM_SETTINGS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
+GO
+
+-- 3.10 WORK_CATEGORIES
+CREATE SEQUENCE SEQ_WORK_CATEGORIES_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
+GO
+CREATE OR REPLACE TRIGGER TRG_WORK_CATEGORIES_BI
+  BEFORE INSERT ON WORK_CATEGORIES FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_WORK_CATEGORIES_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
+GO
+
+-- 3.11 WORK_ITEMS
+CREATE SEQUENCE SEQ_WORK_ITEMS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
+GO
+CREATE OR REPLACE TRIGGER TRG_WORK_ITEMS_BI
+  BEFORE INSERT ON WORK_ITEMS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_WORK_ITEMS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
+GO
+
+-- 3.12 DAILY_PLANS
+CREATE SEQUENCE SEQ_DAILY_PLANS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
+GO
+CREATE OR REPLACE TRIGGER TRG_DAILY_PLANS_BI
+  BEFORE INSERT ON DAILY_PLANS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_DAILY_PLANS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
+GO
+
+-- 3.13 WORK_LOGS
+CREATE SEQUENCE SEQ_WORK_LOGS_ID START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE
+GO
+CREATE OR REPLACE TRIGGER TRG_WORK_LOGS_BI
+  BEFORE INSERT ON WORK_LOGS FOR EACH ROW WHEN (NEW.ID IS NULL)
+BEGIN SELECT SEQ_WORK_LOGS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
 GO
 
 -- ----------------------------------------------------------------------------
--- 4. init_oracle.sql 执行结果自检
+-- 4. INSERT INIT DATA - 初始化基础数据
+--    INSERT 不指定 ID 列, TRIGGER 自动从 SEQUENCE 取 NEXTVAL 填充
+-- ----------------------------------------------------------------------------
+
+-- 4.1 项目 PROJECTS (5个)
+INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('机台驱动升级项目', '升级所有机台的驱动版本', 65.0)
+GO
+INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('CIM系统优化',     '优化CIM系统性能',           40.0)
+GO
+INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('新项目设备接入',  '新项目设备接入CIM系统',     25.0)
+GO
+INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('自动化测试框架',  '建立自动化测试框架',         80.0)
+GO
+INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('数据采集系统',    '升级数据采集系统',           50.0)
+GO
+
+-- 4.2 任务 TASKS (8条)
+INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (1, '光刻机驱动开发',   'high')
+GO
+INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (1, '刻蚀机驱动测试',   'medium')
+GO
+INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (2, '数据库性能调优', 'high')
+GO
+INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (2, 'API接口优化',     'medium')
+GO
+INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (3, '新设备调研',       'medium')
+GO
+INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (4, '测试用例编写',     'medium')
+GO
+INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (4, '测试框架部署',     'high')
+GO
+INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (5, '数据采集脚本开发', 'high')
+GO
+
+-- 4.3 需求 REQUIREMENTS (5条) — 示例 EQUIPMENT_NAME 留空, 执行人按实际填入真实机台编号
+INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('机台A驱动升级',  '将机台A的驱动从v1升级到v2', 'high',     1)
+GO
+INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('新增机台配置项', '为机台新增配置项支持',       'medium',   1)
+GO
+INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('机台B上线',     '新机台B上线部署',           'critical', 3)
+GO
+INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('报表功能优化',  '优化现有报表功能',           'low',      2)
+GO
+INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('系统告警优化',  '优化系统告警机制',           'medium',   2)
+GO
+
+-- 4.4 用户 USERS (3个)
+INSERT INTO USERS (USERNAME, DISPLAY_NAME, EMAIL, ROLE, DEPARTMENT, TEAM) VALUES ('administrator', '管理员',   'admin@company.com', 'admin',    'IT',   'CIM')
+GO
+INSERT INTO USERS (USERNAME, DISPLAY_NAME, EMAIL, ROLE, DEPARTMENT, TEAM) VALUES ('eap.engineer',  'EAP工程师', 'eap@company.com',   'engineer', '制造', 'EAP')
+GO
+INSERT INTO USERS (USERNAME, DISPLAY_NAME, EMAIL, ROLE, DEPARTMENT, TEAM) VALUES ('cim.user',      'CIM用户',  'cim@company.com',   'user',     '制造', 'CIM')
+GO
+
+-- 4.5 系统设置 SYSTEM_SETTINGS (9项)
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('system_name',         'CIM Work Manager',                                            '系统名称',                   'general')
+GO
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('openai_api_key',      '',                                                            'OpenAI API Key',             'ai')
+GO
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('openai_api_base',     'https://api.openai.com/v1',                                   'OpenAI API Base URL',        'ai')
+GO
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('ai_model',            'gpt-4o-mini',                                                  'AI Model Name',              'ai')
+GO
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('notes_server_url',    '',                                                             'HCL Notes Server URL',       'notes')
+GO
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('notes_user',          '',                                                             'HCL Notes Username',         'notes')
+GO
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('notes_password',      '',                                                             'HCL Notes Password',         'notes')
+GO
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('git_source_base_url', 'https://github.com/leanerone/web/blob/main/equipment',         'Git 源码基础 URL',           'equipment')
+GO
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('git_source_map',      '{"1":"cpc/asm_eagle","2":"pecvd/asm_trident","3":"gateox/tel_8280","4":"tteox/thermawave_op5205t","5":"cateox/asml_8350"}', 'SOURCECODE→Git子路径映射(JSON)', 'equipment')
+GO
+
+-- 4.6 工作类别 WORK_CATEGORIES (8个字典)
+INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Operation/Follow up', 'operation',     '日常操作跟进',     '🔄', '#3B82F6', 1)
+GO
+INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Requirement',         'requirement',   '需求跟进与管理',   '📋', '#8B5CF6', 2)
+GO
+INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('SIT',                 'sit',           '系统集成测试',     '🔬', '#06B6D4', 3)
+GO
+INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Place then GO',       'place_then_go', '上线部署跟踪',     '🚀', '#10B981', 4)
+GO
+INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('AI开发',              'ai_dev',        'AI项目开发与部署', '🤖', '#F59E0B', 5)
+GO
+INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('RCMS',                'rcms',          'RCMS系统测试',     '🔧', '#EF4444', 6)
+GO
+INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Other',               'other',         '其他工作',         '📦', '#6B7280', 7)
+GO
+INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('System HandOver',     'handover',      '系统交接',         '🔗', '#EC4899', 8)
+GO
+
+-- ----------------------------------------------------------------------------
+-- 5. 执行结果自检
 -- ----------------------------------------------------------------------------
 SELECT 'PROJECTS'         AS TBL, COUNT(*) AS CNT FROM PROJECTS         UNION ALL
 SELECT 'TASKS',             COUNT(*) FROM TASKS              UNION ALL
@@ -578,5 +639,10 @@ SELECT 'WORK_LOGS',         COUNT(*) FROM WORK_LOGS
 ORDER BY 1
 GO
 
-SELECT 'init_oracle.sql 执行完成! 13张表 + SEQUENCE/TRIGGER 创建完毕, EQUIPMENTINFO 量产数据未受影响' AS MSG FROM DUAL
+SELECT COUNT(*) AS SEQ_CNT FROM USER_SEQUENCES WHERE SEQUENCE_NAME LIKE 'SEQ_%_ID'
+GO
+SELECT COUNT(*) AS TRG_CNT FROM USER_TRIGGERS  WHERE TRIGGER_NAME LIKE 'TRG_%_BI'
+GO
+
+SELECT 'init_oracle.sql v1.4 执行完成! 13张表 + 13 SEQUENCE + 13 TRIGGER 创建完毕, EQUIPMENTINFO 量产数据未受影响' AS MSG FROM DUAL
 GO
