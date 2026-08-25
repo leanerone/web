@@ -1,9 +1,9 @@
 # CIM Work Manager Oracle 生产环境部署 SOP
 
-> **适用版本**: v1.4.x（PANJOB 直连版，显式 SEQUENCE+TRIGGER，无 EQUIPMENTINFO 外键）
+> **适用版本**: v1.5.x（PANJOB 直连版，显式 SEQUENCE+TRIGGER，需 DBA 一行 GRANT）
 > **适用场景**: 新服务器部署本项目，连接 **Oracle 生产数据库**，用 **PANJOB 账号直连**，在 `PANJOB.EQUIPMENTINFO` 所在表空间创建业务表，前端直接读取展示量产机台数据
-> **预估耗时**: 约 15 分钟（无需 DBA，单步 SQL 部署）
-> **执行角色**: 应用运维（PANJOB 账号持有人）
+> **预估耗时**: 约 15 分钟（DBA 一行授权 + 单步 SQL 部署）
+> **执行角色**: 应用运维（PANJOB 账号持有人）+ DBA（仅一次 GRANT）
 > **代码分支**: test1
 
 ---
@@ -12,6 +12,9 @@
 
 1. [方案核心说明](#0-方案核心说明)
 2. [部署前置条件](#1-部署前置条件)
+   - 1.1 账号与权限
+   - 1.2 验证 PANJOB 账号可用
+   - 1.3 DBA 一次性授权（关键前置步骤）
 3. [单步 SQL 部署：init_oracle.sql](#2-单步-sql-部署init_oraclesql)
 4. [后端 Oracle 连接配置（.env）](#3-后端-oracle-连接配置env)
 5. [代码部署与启动验证](#4-代码部署与启动验证)
@@ -36,9 +39,10 @@
 | 后端 ORM | `Equipment.__tablename__ = "EQUIPMENTINFO"`，直接映射 18 列真表 |
 | 读取方式 | SQLAlchemy 只读 SELECT，**后端不提供 POST/PUT/DELETE 写操作路由** |
 | 状态字段 | EQUIPMENTINFO 无 `STATUS` 列，由 `OS` 字段派生：含 `Win` → online，NULL → offline，其他 → maintenance |
-| 自增列 | **显式 CREATE SEQUENCE + CREATE TRIGGER**（共 13 对，显式 SQL 通过 ROLE 权限即可，**不用 PL/SQL 循环**） |
+| 自增列 | **显式 CREATE SEQUENCE + CREATE TRIGGER**（共 13 对，显式 SQL，**需要 DBA 一行 GRANT 授权**，详见 1.3 节） |
 | 机台类型下拉 | 前端从机台列表前端去重，后端 `/api/equipment/types` 直接查 EQUIPMENTINFO 去重，**无 EQUIPMENT_TYPES 视图** |
 | EQUIPMENT_NAME 关联 | **不建外键**（生产表 EQUIPMENT 列无 PK/UNIQUE 约束，建 FK 会报 ORA-02270），只建普通索引，后端应用层校验存在性 |
+| DBA 介入 | **仅一次 GRANT**（`GRANT CREATE SEQUENCE, CREATE TRIGGER TO PANJOB;`），永久生效，详见 1.3 节 |
 
 **v1.4 相对 v1.3 的修正（针对 ADS 实际执行报错）：**
 
@@ -66,9 +70,10 @@
 | 项 | 要求 |
 |----|------|
 | Oracle 账号 | **PANJOB**（即 EQUIPMENTINFO 表的 owner） |
-| 权限 | PANJOB 作为表 owner 默认拥有：CREATE SESSION / CREATE TABLE / CREATE SEQUENCE / CREATE TRIGGER / CREATE PROCEDURE / CREATE TYPE。**不需要 CREATE VIEW**（v1.4 已去掉视图）。CREATE SEQUENCE/TRIGGER 权限通过 ROLE 授予即可（v1.4 用显式 SQL，不用 PL/SQL 循环） |
+| 权限 | PANJOB 作为表 owner 默认拥有 CREATE SESSION / CREATE TABLE，但**实测部分生产环境 PANJOB 缺少 CREATE SEQUENCE / CREATE TRIGGER 系统权限**（连显式 SQL 都报 ORA-01031），需要 DBA 一次性授权（见 1.3 节） |
+| 不需要的权限 | **不需要 CREATE VIEW**（v1.4 已去掉视图） |
 | 表空间配额 | PANJOB 默认表空间无配额限制（owner 默认 UNLIMITED） |
-| DBA 介入 | **无需 DBA 介入**（除非 PANJOB 密码忘记需重置） |
+| DBA 介入 | **仅一次 GRANT 授权**（CREATE SEQUENCE + CREATE TRIGGER），见 1.3 节 |
 
 ### 1.2 验证 PANJOB 账号可用
 
@@ -87,12 +92,39 @@ GO
 SELECT DEFAULT_TABLESPACE FROM USER_USERS;
 GO
 
--- 确认 PANJOB 有 CREATE TABLE / SEQUENCE / TRIGGER 权限 (无需 CREATE VIEW)
+-- ⚠️ 关键: 确认 PANJOB 有 CREATE SEQUENCE / CREATE TRIGGER 权限
+--    若下面结果没有 CREATE SEQUENCE / CREATE TRIGGER, 必须先做 1.3 节 DBA 授权
 SELECT PRIVILEGE FROM USER_SYS_PRIVS ORDER BY 1;
 GO
 ```
 
-若以上 4 条全部正常通过，即可进入第 2 步部署。
+若 `USER_SYS_PRIVS` 结果**缺少 CREATE SEQUENCE 或 CREATE TRIGGER**，必须先完成 1.3 节 DBA 授权，否则脚本段 3 会报 `ORA-01031: 权限不足`。
+
+### 1.3 DBA 一次性授权（关键前置步骤）
+
+请 DBA 用 SYS/SYSTEM 账号执行以下**一行 SQL**（一次性，永久生效）：
+
+```sql
+-- DBA 用 SYS/SYSTEM 登录执行:
+GRANT CREATE SEQUENCE, CREATE TRIGGER TO PANJOB;
+GO
+```
+
+**说明：**
+- 这是 **DIRECT GRANT**（直接授权，非通过 ROLE），永久生效，不需要重复执行
+- 授权后 PANJOB 就能创建 SEQUENCE 和 TRIGGER，本项目的 13 张业务表自增列才能工作
+- 不影响 EQUIPMENTINFO 量产表（量产表已存在，不需要新建 SEQUENCE/TRIGGER）
+- 若企业安全策略不允许 DIRECT GRANT，需走企业内部 DBA 工单流程
+
+**授权后验证：**
+
+```sql
+-- PANJOB 登录后再次查询, 应能看到 CREATE SEQUENCE / CREATE TRIGGER
+SELECT PRIVILEGE FROM USER_SYS_PRIVS ORDER BY 1;
+GO
+```
+
+确认结果包含 `CREATE SEQUENCE` 和 `CREATE TRIGGER` 两行后，即可进入第 2 步部署。
 
 ---
 
@@ -533,10 +565,20 @@ GO
 **原因**：生产表 `EQUIPMENTINFO.EQUIPMENT` 列没有 PK 或 UNIQUE 约束，Oracle 不允许建外键指向它。
 **处理**：v1.4 已去掉指向 EQUIPMENTINFO 的外键，`EQUIPMENT_NAME` 只建普通索引，后端应用层校验存在性。若仍报错说明用的是旧版脚本，请拉最新 test1 分支。
 
-### Q13. `ORA-01031: 权限不足` on PL/SQL `EXECUTE IMMEDIATE 'CREATE SEQUENCE ...'`
-**原因**：PANJOB 的 CREATE SEQUENCE/TRIGGER 权限通过 ROLE 授予（如 RESOURCE 角色），但 **PL/SQL 块内执行 DDL 需要 DIRECT GRANT**，ROLE 权限在 PL/SQL 内不生效。
-**处理**：v1.4 已改用 13 对显式 `CREATE SEQUENCE` + `CREATE TRIGGER` SQL（不用 PL/SQL 循环），显式 SQL 通过 ROLE 权限即可执行。若仍报错说明用的是旧版脚本，请拉最新 test1 分支。
-**替代方案**（不推荐）：让 DBA 执行 `GRANT CREATE SEQUENCE, CREATE TRIGGER TO PANJOB;`（直接授权，非通过 ROLE），然后可以用 PL/SQL 循环。
+### Q13. `ORA-01031: 权限不足` on `CREATE SEQUENCE` / `CREATE TRIGGER` (显式 SQL 也报错)
+**原因**：PANJOB 账号在生产环境中**完全没有 CREATE SEQUENCE / CREATE TRIGGER 系统权限**（连显式 SQL 都报错，说明不是 ROLE 授权问题，是权限缺失）。
+**处理**：找 DBA 用 SYS/SYSTEM 执行一行 SQL（一次性，永久生效）：
+```sql
+GRANT CREATE SEQUENCE, CREATE TRIGGER TO PANJOB;
+GO
+```
+授权后**不需要重跑整个 init_oracle.sql**，只需在 ADS 中重新执行脚本**段 3.1-3.13**（CREATE SEQUENCE + CREATE TRIGGER 部分）和**段 4**（INSERT 数据）即可。详见 1.3 节。
+**验证授权成功**：
+```sql
+SELECT PRIVILEGE FROM USER_SYS_PRIVS WHERE PRIVILEGE IN ('CREATE SEQUENCE','CREATE TRIGGER');
+GO
+```
+应返回 2 行。
 
 ### Q14. `ORA-01408: 此列列表已索引` on `CREATE INDEX IDX_USERS_USERNAME` 等
 **原因**：表定义已有 `CONSTRAINT UK_USERS_USERNAME UNIQUE (USERNAME)`，UNIQUE 约束会自动创建唯一索引，再 `CREATE INDEX` 同列会重复。
@@ -589,16 +631,23 @@ GO
 ## 部署流程速记（极简版）
 
 ```
-1. ADS 用 PANJOB 登录 → 执行 init_oracle.sql (F5 整文件)
-   ↓ (单步完成，无需 DBA，无需第二步；无 PRINT，无 IDENTITY，无 CREATE VIEW)
-2. backend/ 下复制 .env.oracle.example 为 .env
+0. DBA 用 SYS/SYSTEM 执行: GRANT CREATE SEQUENCE, CREATE TRIGGER TO PANJOB;  (一次性)
    ↓
-3. 编辑 .env: DATABASE_TYPE=oracle, ORACLE_USER=PANJOB, ORACLE_PASSWORD=xxx, ORACLE_DSN=xxx
+1. ADS 用 PANJOB 登录 → 验证 USER_SYS_PRIVS 含 CREATE SEQUENCE / CREATE TRIGGER
    ↓
-4. 跑 test_oracle_equipment.py 自检
+2. 执行 init_oracle.sql (F5 整文件)
+   ↓ (单步完成；无 PRINT，无 IDENTITY，无 CREATE VIEW，无指向 EQUIPMENTINFO 的外键)
+3. backend/ 下复制 .env.oracle.example 为 .env
    ↓
-5. 启动 uvicorn + 前端 → 访问 /equipment 验证机台列表 = 量产真实数据
+4. 编辑 .env: DATABASE_TYPE=oracle, ORACLE_USER=PANJOB, ORACLE_PASSWORD=xxx, ORACLE_DSN=xxx
+   ↓
+5. 跑 test_oracle_equipment.py 自检
+   ↓
+6. 启动 uvicorn + 前端 → 访问 /equipment 验证机台列表 = 量产真实数据
 ```
+
+**如果之前已经执行过失败的 init_oracle.sql（表已建但 SEQUENCE/TRIGGER 没建）：**
+- DBA 授权后，只需在 ADS 中重新执行脚本**段 3.1-3.13**（CREATE SEQUENCE + CREATE TRIGGER）+ **段 4**（INSERT 数据），不需要重跑建表段。
 
 ---
 

@@ -5,7 +5,11 @@
 -- 执行方式: 打开本文件 -> 连接目标Oracle实例 -> 整文件"执行" (F5)
 --
 -- ╔════════════════════════════════════════════════════════════════════════╗
--- ║  【量产部署方案 - PANJOB 账号直连 v1.4】                                ║
+-- ║  【量产部署方案 - PANJOB 账号直连 v1.5】                                ║
+-- ║                                                                        ║
+-- ║  ⚠️ 前置条件: DBA 必须先执行一行授权 (一次性, 永久生效):              ║
+-- ║     GRANT CREATE SEQUENCE, CREATE TRIGGER TO PANJOB;                   ║
+-- ║     (否则段 3 CREATE SEQUENCE/TRIGGER 会报 ORA-01031 权限不足)          ║
 -- ║                                                                        ║
 -- ║  · 登录账号: PANJOB (与 EQUIPMENTINFO 同账号)                          ║
 -- ║  · 机台主表 EQUIPMENTINFO 已存在且为生产数据，本脚本【绝不创建/修改】!  ║
@@ -15,13 +19,16 @@
 -- ║      CHANGE_RECORDS / REPORTS / NOTES_DOCUMENTS /                     ║
 -- ║      USERS / SYSTEM_SETTINGS / WORK_CATEGORIES / WORK_ITEMS /          ║
 -- ║      DAILY_PLANS / WORK_LOGS                                           ║
--- ║  · 自增列: SEQUENCE + TRIGGER (显式 SQL, 非PL/SQL循环, 兼容 ROLE 授权) ║
+-- ║  · 自增列: 显式 CREATE SEQUENCE + CREATE TRIGGER (13 对, 非 PL/SQL)    ║
 -- ║  · 不建外键指向 EQUIPMENTINFO (生产表 EQUIPMENT 无 PK/UNIQUE 约束),    ║
 -- ║    EQUIPMENT_NAME 只建普通索引, 后端应用层校验存在性                    ║
 -- ║  · 不使用 PRINT, 不使用 IDENTITY, 不使用 CREATE VIEW                   ║
 -- ║                                                                        ║
 -- ║  · 单步部署：本脚本执行完毕即可启动后端，无需第二步!                   ║
 -- ║  · 禁止在已有业务数据的环境下重复执行本脚本！DROP 段会清空所有表。     ║
+-- ║                                                                        ║
+-- ║  · 若之前已执行过失败脚本 (表已建但 SEQ/TRG 没建):                    ║
+-- ║    DBA 授权后只需重跑段 3.1-3.13 + 段 4, 不需要重跑建表段              ║
 -- ╚════════════════════════════════════════════════════════════════════════╝
 -- ============================================================================
 
@@ -38,6 +45,17 @@ GO
 SELECT COUNT(*) AS EQUIPMENTINFO_ROWS FROM EQUIPMENTINFO
 GO
 SELECT '若上面 EQUIPMENTINFO_ROWS = 0 或报 ORA-00942, 请中止: 当前账号无 EQUIPMENTINFO 表!' AS MSG FROM DUAL
+GO
+
+-- ⚠️ 关键: 检查 CREATE SEQUENCE / CREATE TRIGGER 权限
+--    若下面查询不返回这两行, 段 3 会报 ORA-01031, 必须先找 DBA 执行:
+--    GRANT CREATE SEQUENCE, CREATE TRIGGER TO PANJOB;
+SELECT PRIVILEGE
+  FROM USER_SYS_PRIVS
+ WHERE PRIVILEGE IN ('CREATE SEQUENCE','CREATE TRIGGER')
+ ORDER BY 1
+GO
+SELECT '若上面未返回 CREATE SEQUENCE 和 CREATE TRIGGER 两行, 请中止并找 DBA 授权!' AS MSG FROM DUAL
 GO
 
 -- ----------------------------------------------------------------------------
@@ -644,5 +662,5 @@ GO
 SELECT COUNT(*) AS TRG_CNT FROM USER_TRIGGERS  WHERE TRIGGER_NAME LIKE 'TRG_%_BI'
 GO
 
-SELECT 'init_oracle.sql v1.4 执行完成! 13张表 + 13 SEQUENCE + 13 TRIGGER 创建完毕, EQUIPMENTINFO 量产数据未受影响' AS MSG FROM DUAL
+SELECT 'init_oracle.sql v1.5 执行完成! 13张表 + 13 SEQUENCE + 13 TRIGGER 创建完毕, EQUIPMENTINFO 量产数据未受影响' AS MSG FROM DUAL
 GO
