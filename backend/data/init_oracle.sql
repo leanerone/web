@@ -1,23 +1,25 @@
 -- ============================================================================
 -- CIM Work Manager - Oracle Database Initialization Script
 -- 适用工具: Aqua Data Studio (批处理分隔符: GO)
--- 数据库版本: Oracle 12c 及以上 (使用 IDENTITY 自增列)
--- 执行方式: 打开本文件 -> 连接目标Oracle实例 -> 整文件"执行"
+-- 数据库版本: Oracle 11g / 12c 通用 (使用 SEQUENCE + TRIGGER 自增, 全版本兼容)
+-- 执行方式: 打开本文件 -> 连接目标Oracle实例 -> 整文件"执行" (F5)
 --
 -- ╔════════════════════════════════════════════════════════════════════════╗
 -- ║  【量产部署方案 - PANJOB 账号直连】                                    ║
 -- ║                                                                        ║
--- ║  · 登录账号: PANJOB (与 EQUIPMENTINFO 同账号，所有新建表落在 PANJOB     ║
--- ║    默认表空间 = EQUIPMENTINFO 所在表空间)                              ║
+-- ║  · 登录账号: PANJOB (与 EQUIPMENTINFO 同账号)                          ║
 -- ║  · 机台主表 EQUIPMENTINFO 已存在且为生产数据，本脚本【绝不创建/修改】!  ║
 -- ║    后端 ORM 直接映射此真表，前端只读展示。                             ║
--- ║  · 本脚本只创建 13 张业务表 + 1 个类型视图 (EQUIPMENT_TYPES)：         ║
--- ║      PROJECTS / TASKS / EQUIPMENT_TYPES(视图) / CONFIGURATIONS /       ║
--- ║      REQUIREMENTS / CHANGE_RECORDS / REPORTS / NOTES_DOCUMENTS /       ║
--- ║      USERS / SYSTEM_SETTINGS / WORK_CATEGORIES / WORK_ITEMS /         ║
+-- ║  · 本脚本只创建 13 张业务表:                                           ║
+-- ║      PROJECTS / TASKS / CONFIGURATIONS / REQUIREMENTS /               ║
+-- ║      CHANGE_RECORDS / REPORTS / NOTES_DOCUMENTS /                     ║
+-- ║      USERS / SYSTEM_SETTINGS / WORK_CATEGORIES / WORK_ITEMS /          ║
 -- ║      DAILY_PLANS / WORK_LOGS                                           ║
--- ║  · 外键 CONFIGURATIONS.EQUIPMENT_NAME / REQUIREMENTS.EQUIPMENT_NAME    ║
+-- ║  · 自增列: SEQUENCE + TRIGGER (兼容 Oracle 11g/12c, 无需 IDENTITY)    ║
+-- ║  · 外键 CONFIGURATIONS.EQUIPMENT_NAME / REQUIREMENTS.EQUIPMENT_NAME   ║
 -- ║    引用 EQUIPMENTINFO.EQUIPMENT (VARCHAR2 主键)                        ║
+-- ║  · 不创建 EQUIPMENT_TYPES 视图 (避免 CREATE VIEW 权限依赖)            ║
+-- ║    前端类型下拉从机台列表前端去重, 后端 /types 从 EQUIPMENTINFO 去重   ║
 -- ║                                                                        ║
 -- ║  · 单步部署：本脚本执行完毕即可启动后端，无需第二步!                   ║
 -- ║  · 禁止在已有业务数据的环境下重复执行本脚本！DROP 段会清空所有表。     ║
@@ -26,69 +28,58 @@
 -- 注意事项:
 --   1. 执行前请确认已用 PANJOB 账号登录 (脚本段 0 会自检)
 --   2. 所有 CREATE TABLE 不指定 TABLESPACE，自动落在 PANJOB 默认表空间
---   3. 若为 Oracle 11g，请将所有 "GENERATED AS IDENTITY" 改为 SEQUENCE + TRIGGER 方案
+--   3. 本脚本不使用 PRINT 语句 (Oracle 不支持), 用 SELECT ... FROM DUAL 提示
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
 -- 0. 执行环境自检
 -- ----------------------------------------------------------------------------
--- 显示当前登录用户与实例 (ADS结果面板可见)
+-- 显示当前登录用户与实例
 SELECT USER         AS CUR_USER,
        SYS_CONTEXT('USERENV','INSTANCE_NAME') AS INST_NAME,
        SYS_CONTEXT('USERENV','SERVICE_NAME')  AS SVC_NAME
   FROM DUAL
 GO
-PRINT '===================================================='
-PRINT ' 若上面 CUR_USER 不是 PANJOB，请中止并切换连接！     '
-PRINT '===================================================='
+
+SELECT '若上面 CUR_USER 不是 PANJOB，请中止并切换连接!' AS MSG FROM DUAL
 GO
 
 -- 确认 EQUIPMENTINFO 表存在于当前用户下
 SELECT COUNT(*) AS EQUIPMENTINFO_ROWS FROM EQUIPMENTINFO
 GO
-PRINT '===================================================='
-PRINT ' 若上面 EQUIPMENTINFO_ROWS = 0 或报 ORA-00942,         '
-PRINT ' 请中止: 当前账号无 EQUIPMENTINFO 表，无法部署!       '
-PRINT '===================================================='
+
+SELECT '若上面 EQUIPMENTINFO_ROWS = 0 或报 ORA-00942, 请中止: 当前账号无 EQUIPMENTINFO 表!' AS MSG FROM DUAL
 GO
 
 -- ----------------------------------------------------------------------------
--- 1. DROP TABLES / VIEWS (级联删除，按外键依赖顺序 — 仅首次部署安全执行)
+-- 1. DROP TABLES / SEQUENCES / TRIGGERS (级联删除, 按外键依赖顺序)
+--    PL/SQL 动态 DROP: 对象不存在时不报错 (避免首次执行被 ORA-00942 中断)
+--    ⚠️ 严禁 DROP EQUIPMENTINFO! 列表中绝无 'EQUIPMENTINFO'
 -- ----------------------------------------------------------------------------
--- 使用 PL/SQL 动态 DROP：对象不存在时不报错，避免首次执行被 ORA-00942 中断
--- ⚠️ 严禁 DROP EQUIPMENTINFO！以下列表中绝无 'EQUIPMENTINFO'
 DECLARE
-  PROCEDURE drop_if_exists(p_name IN VARCHAR2) IS
+  TYPE t_arr IS TABLE OF VARCHAR2(30);
+  v_tabs t_arr := t_arr(
+    'WORK_LOGS','DAILY_PLANS','WORK_ITEMS','WORK_CATEGORIES','SYSTEM_SETTINGS',
+    'USERS','NOTES_DOCUMENTS','REPORTS','CHANGE_RECORDS','CONFIGURATIONS',
+    'REQUIREMENTS','TASKS','PROJECTS'
+  );
+  v_seq VARCHAR2(40);
+  v_trg VARCHAR2(40);
+  PROCEDURE drop_obj(p_sql VARCHAR2) IS
   BEGIN
-    EXECUTE IMMEDIATE 'DROP TABLE ' || p_name || ' CASCADE CONSTRAINTS PURGE';
-    DBMS_OUTPUT.PUT_LINE('DROP TABLE OK : ' || p_name);
+    EXECUTE IMMEDIATE p_sql;
   EXCEPTION WHEN OTHERS THEN
-    IF SQLCODE = -942 THEN NULL;  -- 表不存在，忽略
-    ELSE RAISE; END IF;
-  END;
-  PROCEDURE drop_view_if_exists(p_name IN VARCHAR2) IS
-  BEGIN
-    EXECUTE IMMEDIATE 'DROP VIEW ' || p_name;
-    DBMS_OUTPUT.PUT_LINE('DROP VIEW  OK : ' || p_name);
-  EXCEPTION WHEN OTHERS THEN
-    IF SQLCODE = -942 THEN NULL;
+    IF SQLCODE IN (-942,-2289,-4080,-904,-6553) THEN NULL;
     ELSE RAISE; END IF;
   END;
 BEGIN
-  drop_if_exists('WORK_LOGS');
-  drop_if_exists('DAILY_PLANS');
-  drop_if_exists('WORK_ITEMS');
-  drop_if_exists('WORK_CATEGORIES');
-  drop_if_exists('SYSTEM_SETTINGS');
-  drop_if_exists('USERS');
-  drop_if_exists('NOTES_DOCUMENTS');
-  drop_if_exists('REPORTS');
-  drop_if_exists('CHANGE_RECORDS');
-  drop_if_exists('CONFIGURATIONS');
-  drop_if_exists('REQUIREMENTS');
-  drop_view_if_exists('EQUIPMENT_TYPES');   -- 视图，先于 EQUIPMENT_TYPES 表
-  drop_if_exists('TASKS');
-  drop_if_exists('PROJECTS');
+  FOR i IN 1..v_tabs.COUNT LOOP
+    v_seq := 'SEQ_' || v_tabs(i) || '_ID';
+    v_trg := 'TRG_' || v_tabs(i) || '_BI';
+    drop_obj('DROP TABLE ' || v_tabs(i) || ' CASCADE CONSTRAINTS PURGE');
+    drop_obj('DROP TRIGGER ' || v_trg);
+    drop_obj('DROP SEQUENCE ' || v_seq);
+  END LOOP;
   COMMIT;
 END;
 GO
@@ -96,11 +87,12 @@ GO
 -- ----------------------------------------------------------------------------
 -- 2. CREATE TABLES — 13 张业务表全部创建在 PANJOB 下 (与 EQUIPMENTINFO 同表空间)
 --    不指定 TABLESPACE，使用 PANJOB 默认表空间。
+--    ID 列: NUMBER(10) PRIMARY KEY (自增由段 2.15 的 SEQUENCE+TRIGGER 实现)
 -- ----------------------------------------------------------------------------
 
 -- 2.1 PROJECTS - 项目表
 CREATE TABLE PROJECTS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     NAME            VARCHAR2(200 CHAR) NOT NULL,
     DESCRIPTION     CLOB,
     STATUS          VARCHAR2(20 CHAR) DEFAULT 'active',
@@ -137,7 +129,7 @@ GO
 
 -- 2.2 TASKS - 任务表
 CREATE TABLE TASKS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     PROJECT_ID      NUMBER(10),
     TITLE           VARCHAR2(200 CHAR) NOT NULL,
     DESCRIPTION     CLOB,
@@ -164,27 +156,9 @@ GO
 CREATE INDEX IDX_TASKS_STATUS     ON TASKS(STATUS)
 GO
 
--- 2.3 EQUIPMENT_TYPES - 机台类型视图 (从 EQUIPMENTINFO 去重 EQUIPMENTTYPE 列)
---     后端 EquipmentType ORM 读取此视图，前端筛选下拉框自动同步量产真实类型
-CREATE OR REPLACE VIEW EQUIPMENT_TYPES AS
-SELECT
-    ROWNUM                                    AS ID,
-    EQUIPMENTTYPE                             AS NAME,
-    '量产机台类型: ' || EQUIPMENTTYPE          AS DESCRIPTION,
-    NULL                                      AS MANUFACTURER
-  FROM (
-    SELECT DISTINCT EQUIPMENTTYPE
-      FROM EQUIPMENTINFO
-     WHERE EQUIPMENTTYPE IS NOT NULL
-     ORDER BY EQUIPMENTTYPE
-  )
-GO
-COMMENT ON TABLE EQUIPMENT_TYPES IS '机台类型视图 (从 EQUIPMENTINFO 去重 EQUIPMENTTYPE)'
-GO
-
--- 2.4 CONFIGURATIONS - 机台配置项表 (外键引用 EQUIPMENTINFO.EQUIPMENT)
+-- 2.3 CONFIGURATIONS - 机台配置项表 (外键引用 EQUIPMENTINFO.EQUIPMENT)
 CREATE TABLE CONFIGURATIONS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     EQUIPMENT_NAME  VARCHAR2(32 CHAR),
     CONFIG_KEY      VARCHAR2(100 CHAR) NOT NULL,
     CONFIG_VALUE    CLOB,
@@ -206,9 +180,9 @@ GO
 CREATE INDEX IDX_CONFIG_KEY            ON CONFIGURATIONS(CONFIG_KEY)
 GO
 
--- 2.5 REQUIREMENTS - 需求表 (外键引用 EQUIPMENTINFO.EQUIPMENT)
+-- 2.4 REQUIREMENTS - 需求表 (外键引用 EQUIPMENTINFO.EQUIPMENT)
 CREATE TABLE REQUIREMENTS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     TITLE           VARCHAR2(200 CHAR) NOT NULL,
     DESCRIPTION     CLOB,
     PRIORITY        VARCHAR2(20 CHAR) DEFAULT 'medium',
@@ -240,9 +214,9 @@ GO
 CREATE INDEX IDX_REQ_PRIORITY        ON REQUIREMENTS(PRIORITY)
 GO
 
--- 2.6 CHANGE_RECORDS - 需求变更记录表
+-- 2.5 CHANGE_RECORDS - 需求变更记录表
 CREATE TABLE CHANGE_RECORDS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     REQUIREMENT_ID  NUMBER(10)    NOT NULL,
     CHANGE_TYPE     VARCHAR2(50 CHAR) NOT NULL,
     DESCRIPTION     CLOB,
@@ -260,9 +234,9 @@ GO
 CREATE INDEX IDX_CHANGE_REQ_ID ON CHANGE_RECORDS(REQUIREMENT_ID)
 GO
 
--- 2.7 REPORTS - 报表表
+-- 2.6 REPORTS - 报表表
 CREATE TABLE REPORTS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     TITLE           VARCHAR2(200 CHAR) NOT NULL,
     REPORT_DATE     DATE            NOT NULL,
     CONTENT         CLOB,
@@ -277,9 +251,9 @@ GO
 CREATE INDEX IDX_REPORTS_DATE ON REPORTS(REPORT_DATE)
 GO
 
--- 2.8 NOTES_DOCUMENTS - HCL Notes 文档同步表
+-- 2.7 NOTES_DOCUMENTS - HCL Notes 文档同步表
 CREATE TABLE NOTES_DOCUMENTS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     NOTES_ID        VARCHAR2(100 CHAR),
     TITLE           VARCHAR2(200 CHAR),
     CONTENT         CLOB,
@@ -299,9 +273,9 @@ GO
 CREATE INDEX IDX_NOTES_PROJECT_ID ON NOTES_DOCUMENTS(PROJECT_ID)
 GO
 
--- 2.9 USERS - 用户表
+-- 2.8 USERS - 用户表
 CREATE TABLE USERS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     USERNAME        VARCHAR2(100 CHAR) NOT NULL,
     DISPLAY_NAME    VARCHAR2(200 CHAR),
     EMAIL           VARCHAR2(200 CHAR),
@@ -327,9 +301,9 @@ GO
 CREATE INDEX IDX_USERS_USERNAME ON USERS(USERNAME)
 GO
 
--- 2.10 SYSTEM_SETTINGS - 系统设置表
+-- 2.9 SYSTEM_SETTINGS - 系统设置表
 CREATE TABLE SYSTEM_SETTINGS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     KEY             VARCHAR2(100 CHAR) NOT NULL,
     VALUE           CLOB,
     DESCRIPTION     VARCHAR2(500 CHAR),
@@ -349,9 +323,9 @@ GO
 CREATE INDEX IDX_SYS_SETTINGS_CATEGORY ON SYSTEM_SETTINGS(CATEGORY)
 GO
 
--- 2.11 WORK_CATEGORIES - 工作类别表
+-- 2.10 WORK_CATEGORIES - 工作类别表
 CREATE TABLE WORK_CATEGORIES (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     NAME            VARCHAR2(100 CHAR) NOT NULL,
     CODE            VARCHAR2(50 CHAR)  NOT NULL,
     DESCRIPTION     VARCHAR2(500 CHAR),
@@ -373,9 +347,9 @@ GO
 CREATE INDEX IDX_WORK_CATEGORIES_CODE ON WORK_CATEGORIES(CODE)
 GO
 
--- 2.12 WORK_ITEMS - 工作项表
+-- 2.11 WORK_ITEMS - 工作项表
 CREATE TABLE WORK_ITEMS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     CATEGORY_ID     NUMBER(10),
     TITLE           VARCHAR2(500 CHAR) NOT NULL,
     DETAILS         CLOB,
@@ -417,9 +391,9 @@ GO
 CREATE INDEX IDX_WORKITEM_PRIORITY    ON WORK_ITEMS(PRIORITY_SCORE)
 GO
 
--- 2.13 DAILY_PLANS - 每日计划表
+-- 2.12 DAILY_PLANS - 每日计划表
 CREATE TABLE DAILY_PLANS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     PLAN_DATE       DATE            NOT NULL,
     USER_ID         NUMBER(10),
     ITEMS_ORDER     CLOB,
@@ -439,9 +413,9 @@ GO
 CREATE UNIQUE INDEX IDX_DAILYPLAN_DATE_USER ON DAILY_PLANS(PLAN_DATE, USER_ID)
 GO
 
--- 2.14 WORK_LOGS - 工作项变更日志表
+-- 2.13 WORK_LOGS - 工作项变更日志表
 CREATE TABLE WORK_LOGS (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
+    ID              NUMBER(10)    PRIMARY KEY,
     WORK_ITEM_ID    NUMBER(10),
     ACTION          VARCHAR2(50 CHAR) NOT NULL,
     DESCRIPTION     CLOB,
@@ -458,11 +432,41 @@ GO
 CREATE INDEX IDX_WORKLOG_CREATED   ON WORK_LOGS(CREATED_AT)
 GO
 
+-- 2.14 批量创建 SEQUENCE + TRIGGER (替代 IDENTITY, 兼容 Oracle 11g/12c)
+--     13 张表各一套, 用 PL/SQL 循环批量创建, 紧凑高效
+DECLARE
+  TYPE t_arr IS TABLE OF VARCHAR2(30);
+  v_tabs t_arr := t_arr(
+    'PROJECTS','TASKS','CONFIGURATIONS','REQUIREMENTS','CHANGE_RECORDS',
+    'REPORTS','NOTES_DOCUMENTS','USERS','SYSTEM_SETTINGS','WORK_CATEGORIES',
+    'WORK_ITEMS','DAILY_PLANS','WORK_LOGS'
+  );
+  v_seq VARCHAR2(40);
+  v_trg VARCHAR2(40);
+  v_sql VARCHAR2(1000);
+BEGIN
+  FOR i IN 1..v_tabs.COUNT LOOP
+    v_seq := 'SEQ_' || v_tabs(i) || '_ID';
+    v_sql := 'CREATE SEQUENCE ' || v_seq || ' START WITH 1 INCREMENT BY 1 NOCACHE NOCYCLE';
+    EXECUTE IMMEDIATE v_sql;
+
+    v_trg := 'TRG_' || v_tabs(i) || '_BI';
+    v_sql := 'CREATE OR REPLACE TRIGGER ' || v_trg ||
+             ' BEFORE INSERT ON ' || v_tabs(i) ||
+             ' FOR EACH ROW WHEN (NEW.ID IS NULL) BEGIN SELECT ' || v_seq ||
+             '.NEXTVAL INTO :NEW.ID FROM DUAL; END;';
+    EXECUTE IMMEDIATE v_sql;
+  END LOOP;
+  COMMIT;
+END;
+GO
+
 -- ----------------------------------------------------------------------------
 -- 3. INSERT INIT DATA - 初始化基础数据
 -- ----------------------------------------------------------------------------
 -- ⚠️ 不插入任何机台数据: EQUIPMENTINFO 已是生产真实数据，直接展示即可。
 --    以下只插入业务基础数据 (项目/任务/需求/用户/系统设置/工作类别)。
+--    INSERT 不指定 ID 列, TRIGGER 会自动从 SEQUENCE 取 NEXTVAL 填充。
 
 -- 3.1 项目 PROJECTS (5个 — 业务种子数据)
 INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('机台驱动升级项目', '升级所有机台的驱动版本',        65.0)
@@ -559,7 +563,6 @@ GO
 -- ----------------------------------------------------------------------------
 SELECT 'PROJECTS'         AS TBL, COUNT(*) AS CNT FROM PROJECTS         UNION ALL
 SELECT 'TASKS',             COUNT(*) FROM TASKS              UNION ALL
-SELECT 'EQUIPMENT_TYPES',   COUNT(*) FROM EQUIPMENT_TYPES    UNION ALL
 SELECT 'EQUIPMENTINFO',     COUNT(*) FROM EQUIPMENTINFO      UNION ALL
 SELECT 'CONFIGURATIONS',    COUNT(*) FROM CONFIGURATIONS     UNION ALL
 SELECT 'REQUIREMENTS',      COUNT(*) FROM REQUIREMENTS       UNION ALL
@@ -575,15 +578,5 @@ SELECT 'WORK_LOGS',         COUNT(*) FROM WORK_LOGS
 ORDER BY 1
 GO
 
-PRINT '==============================================================='
-PRINT ' init_oracle.sql 执行完成!                                     '
-PRINT ' 已创建 13 张业务表 + 1 个类型视图 (EQUIPMENT_TYPES 视图)     '
-PRINT ' 业务基础数据: PROJECTS=5, TASKS=8, REQUIREMENTS=5, USERS=3,   '
-PRINT '               SYS_SET=9(含 git_source_* 2条), CAT=8          '
-PRINT '                                                               '
-PRINT ' ✅ EQUIPMENTINFO = 量产真实机台数据 (未受影响, 直接读取展示) '
-PRINT ' ✅ EQUIPMENT_TYPES 视图 = 从 EQUIPMENTINFO 去重类型          '
-PRINT '                                                               '
-PRINT ' 单步部署完成! 直接启动后端即可使用。                          '
-PRINT '==============================================================='
+SELECT 'init_oracle.sql 执行完成! 13张表 + SEQUENCE/TRIGGER 创建完毕, EQUIPMENTINFO 量产数据未受影响' AS MSG FROM DUAL
 GO

@@ -4,8 +4,31 @@ from database.models import Equipment, EquipmentType, Configuration
 
 
 def get_equipment_types(db: Session):
-    """机台类型列表 — Oracle 中是视图(从 EQUIPMENTINFO 去重)，SQLite 中是普通表"""
-    return db.query(EquipmentType).all()
+    """机台类型列表 — 直接从 EQUIPMENTINFO 去重 EQUIPMENTTYPE
+
+    不依赖 EQUIPMENT_TYPES 视图 (避免 PANJOB 无 CREATE VIEW 权限)。
+    前端类型下拉也同时在前端从机台列表去重, 此接口仅作备用。
+    """
+    try:
+        rows = (
+            db.query(Equipment.equipment_type)
+            .filter(Equipment.equipment_type.isnot(None))
+            .distinct()
+            .order_by(Equipment.equipment_type)
+            .all()
+        )
+        result = []
+        for idx, (name,) in enumerate(rows, 1):
+            et = EquipmentType()
+            et.id = idx
+            et.name = name
+            et.description = f"量产机台类型: {name}"
+            et.manufacturer = None
+            result.append(et)
+        return result
+    except Exception:
+        # Oracle 异常或表结构不匹配时返回空, 不阻断机台列表查询
+        return []
 
 
 def get_equipment_by_name(db: Session, equipment: str):
