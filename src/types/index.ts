@@ -53,6 +53,26 @@ export interface Equipment {
   installed_at: string;
   updated_at: string;
   type?: EquipmentType;
+  // ── 量产 PANJOB.EQUIPMENTINFO 扩展字段 (后端ORM + 视图新增) ──
+  equipment?: string;          // 机台编号 (=eq_name)
+  equipment_type?: string;     // EQUIPMENTTYPE
+  equipment_model?: string;    // EQUIPMENTMODEL
+  line?: string;               // LINE 产线
+  cc_server?: string;          // CCSERVER
+  chargeman?: string;          // CHARGEMAN
+  moxa?: string;               // MOXA
+  nport?: string;              // NPORT
+  nport_ip?: string;           // NPORTIP
+  nport_com?: string;          // NPORTCOM
+  smif1_nport_ip?: string;     // SMIF1NPORTIP
+  smif2_nport_ip?: string;     // SMIF2NPORTIP
+  smif3_nport_ip?: string;     // SMIF3NPORTIP
+  smif4_nport_ip?: string;     // SMIF4NPORTIP
+  os?: string;                 // OS
+  srv_type?: string;           // SRVTYPE
+  source_code?: string;        // SOURCECODE (Git 分类码)
+  extra_19?: string;
+  extra_20?: string;
 }
 
 export interface Configuration {

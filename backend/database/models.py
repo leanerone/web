@@ -97,14 +97,38 @@ class EquipmentType(Base):
 class Equipment(Base):
     __tablename__ = "equipment"
 
+    # === ORM 原生 7 字段 (保留筛选/关联兼容) ===
     id = Column(Integer, primary_key=True, index=True)
     type_id = Column(Integer, ForeignKey("equipment_types.id"))
-    name = Column(String(100), nullable=False)
-    location = Column(String(100))
+    name = Column(String(100), nullable=False)                 # 前端展示名 (来自 EQUIPMENT)
+    location = Column(String(200))                             # Line + Area 拼接
     status = Column(SQLAlchemyEnum(EquipmentStatus), default=EquipmentStatus.online)
-    driver_version = Column(String(50))
+    driver_version = Column(String(200))
     installed_at = Column(Date)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # === 量产 PANJOB.EQUIPMENTINFO 20 个 VARCHAR2(32) 扩展字段 ===
+    equipment       = Column(String(32))                       # 1. 机台编号 (主键名)
+    equipment_type  = Column("EQUIPMENTTYPE", String(32))      # 2. 机台类型 (例: PECVD)
+    equipment_model = Column("EQUIPMENTMODEL", String(32))     # 3. 机台型号 (例: ASM Eagle-10)
+    line            = Column("LINE", String(32))               # 4. 产线 (例: T13)
+    cc_server       = Column("CCSERVER", String(32))           # 5. CC 服务器 (例: C01C225)
+    area            = Column("AREA", String(32))               # 6. 厂区/区域 (例: TF)
+    moxa            = Column("MOXA", String(32))               # 7. 串口速率/类型 (例: 9600)
+    nport           = Column("NPORT", String(32))              # 8. NPort 端口号
+    nport_ip        = Column("NPORTIP", String(32))            # 9. NPort IP 地址
+    nport_com       = Column("NPORTCOM", String(32))           # 10. NPort COM 号
+    chargeman       = Column("CHARGEMAN", String(32))          # 11. 负责人 (例: S.Q)
+    smif1_nport_ip  = Column("SMIF1NPORTIP", String(32))       # 12. SMIF1 NPort IP
+    smif2_nport_ip  = Column("SMIF2NPORTIP", String(32))       # 13. SMIF2 NPort IP
+    smif3_nport_ip  = Column("SMIF3NPORTIP", String(32))       # 14. SMIF3 NPort IP
+    smif4_nport_ip  = Column("SMIF4NPORTIP", String(32))       # 15. SMIF4 NPort IP
+    os              = Column("OS", String(32))                 # 16. 操作系统 (例: Win2019)
+    srv_type        = Column("SRVTYPE", String(32))            # 17. 服务器类型 (例: DL380 G8)
+    source_code     = Column("SOURCECODE", String(32))         # 18. 源码分类码 → Git URL 映射键
+    # 量产表满 20 列, 后两列保留扩展用 (预留)
+    extra_19        = Column("EXTRA19", String(32))
+    extra_20        = Column("EXTRA20", String(32))
 
     type = relationship("EquipmentType", back_populates="equipments")
     requirements = relationship("Requirement", back_populates="equipment")
