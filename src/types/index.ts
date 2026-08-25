@@ -77,7 +77,7 @@ export interface Equipment {
 
 export interface Configuration {
   id: number;
-  equipment_id: number;
+  equipment_name?: string;
   config_key: string;
   config_value: string;
   version: string;
@@ -91,7 +91,7 @@ export interface Requirement {
   priority: 'low' | 'medium' | 'high' | 'critical';
   status: 'pending' | 'in_progress' | 'testing' | 'completed' | 'rejected';
   project_id?: number;
-  equipment_id?: number;
+  equipment_name?: string;
   created_at: string;
   updated_at: string;
   equipment?: Equipment;
@@ -187,7 +187,7 @@ export interface CreateRequirementRequest {
   description?: string;
   priority?: string;
   project_id?: number;
-  equipment_id?: number;
+  equipment_name?: string;
 }
 
 export interface AIPlanRequest {

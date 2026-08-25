@@ -21,8 +21,16 @@ import Button from '@/components/Button';
 import Modal from '@/components/Modal';
 import { useAuthStore } from '@/stores/authStore';
 import { notesAPI, settingsAPI } from '@/services/api';
-import { getRoleLabel } from '@/utils/constants';
 import type { NotesDocument, NotesSettings } from '@/types';
+
+const getRoleLabel = (role: string) => {
+  const labels: Record<string, string> = {
+    admin: '管理员',
+    engineer: '工程师',
+    user: '普通用户',
+  };
+  return labels[role] || role;
+};
 
 export default function Profile() {
   const [isNotesModalOpen, setIsNotesModalOpen] = useState(false);

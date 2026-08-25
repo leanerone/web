@@ -1,17 +1,25 @@
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
-from database.models import Project, Equipment, Requirement, Task, ProjectStatus, EquipmentStatus, TaskStatus, RequirementStatus
+from database.models import Project, Equipment, Requirement, Task, ProjectStatus, TaskStatus, RequirementStatus
 from datetime import date, timedelta
 
 
 def get_dashboard_stats(db: Session):
     today = date.today()
     week_start = today - timedelta(days=today.weekday())
-    
+
     total_projects = db.query(Project).count()
     active_projects = db.query(Project).filter(Project.status == ProjectStatus.active).count()
-    
+
+    # EQUIPMENTINFO 没有 status 列，按 OS 字段派生:
+    #   OS 含 'Win' (大小写不敏感) → online; 否则 → 非 online
     total_equipment = db.query(Equipment).count()
-    online_equipment = db.query(Equipment).filter(Equipment.status == EquipmentStatus.online).count()
+    online_equipment = db.query(Equipment).filter(
+        or_(
+            Equipment.os.ilike('Win%'),
+            Equipment.os.ilike('%Win%'),
+        )
+    ).count()
     
     pending_requirements = db.query(Requirement).filter(Requirement.status == RequirementStatus.pending).count()
     

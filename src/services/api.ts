@@ -21,14 +21,9 @@ import type {
   AISettings,
   NotesSettings,
   SystemSetting,
-  WorkCategory,
-  WorkItem,
-  WorkLog,
-  DailyPlan,
-  WorkStats,
-  CreateWorkItemRequest,
 } from '@/types';
-import { AUTH_STORAGE_KEY } from '@/utils/constants';
+
+const STORAGE_KEY = 'cim_auth';
 
 const api = axios.create({
   baseURL: '/api',
@@ -39,7 +34,7 @@ const api = axios.create({
 api.interceptors.request.use(
   (config) => {
     try {
-      const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+      const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed.token) {
@@ -60,7 +55,7 @@ api.interceptors.response.use(
     console.error('API Error:', error);
     // 401未授权时跳转登录页
     if (error.response?.status === 401) {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
+      localStorage.removeItem(STORAGE_KEY);
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }
@@ -101,26 +96,18 @@ export const taskAPI = {
 };
 
 export const equipmentAPI = {
-  list: (params?: PaginationParams & SearchParams): Promise<APIResponse<Equipment[]>> =>
+  // 量产表 EQUIPMENTINFO 只读，不提供 create/update/delete
+  list: (params?: PaginationParams & SearchParams & { equipment_type?: string; area?: string; line?: string }): Promise<APIResponse<Equipment[]>> =>
     api.get('/equipment', { params }),
-  
-  get: (id: number): Promise<APIResponse<Equipment>> =>
-    api.get(`/equipment/${id}`),
-  
-  create: (data: Partial<Equipment>): Promise<APIResponse<Equipment>> =>
-    api.post('/equipment', data),
-  
-  update: (id: number, data: Partial<Equipment>): Promise<APIResponse<Equipment>> =>
-    api.put(`/equipment/${id}`, data),
-  
-  delete: (id: number): Promise<APIResponse<void>> =>
-    api.delete(`/equipment/${id}`),
-  
+
+  get: (equipmentName: string): Promise<APIResponse<Equipment>> =>
+    api.get(`/equipment/${encodeURIComponent(equipmentName)}`),
+
   types: (): Promise<APIResponse<EquipmentType[]>> =>
     api.get('/equipment/types'),
-  
-  configurations: (equipmentId: number): Promise<APIResponse<Configuration[]>> =>
-    api.get(`/equipment/${equipmentId}/configurations`),
+
+  configurations: (equipmentName: string): Promise<APIResponse<Configuration[]>> =>
+    api.get(`/equipment/${encodeURIComponent(equipmentName)}/configurations`),
 };
 
 export const requirementAPI = {
@@ -167,22 +154,22 @@ export const aiAPI = {
   weeklyReport: (data: AIWeeklyReportRequest): Promise<APIResponse<{ content: string }>> =>
     api.post('/ai/weekly-report', data),
 
-  dailyStandup: (data: { work_items?: WorkItem[]; date?: string }): Promise<APIResponse<{
-    today_tasks: WorkItem[];
-    overdue_tasks: WorkItem[];
+  dailyStandup: (data: { work_items?: import('@/types').WorkItem[]; date?: string }): Promise<APIResponse<{
+    today_tasks: import('@/types').WorkItem[];
+    overdue_tasks: import('@/types').WorkItem[];
     suggestions: string[];
     summary: string;
   }>> =>
     api.post('/ai/daily-standup', data),
 
-  smartSort: (data: { work_items: WorkItem[]; strategy?: string }): Promise<APIResponse<{
-    sorted_items: WorkItem[];
+  smartSort: (data: { work_items: import('@/types').WorkItem[]; strategy?: string }): Promise<APIResponse<{
+    sorted_items: import('@/types').WorkItem[];
     strategy: string;
     explanation: string;
   }>> =>
     api.post('/ai/smart-sort', data),
 
-  checkReminders: (data: { work_items?: WorkItem[]; date?: string }): Promise<APIResponse<{
+  checkReminders: (data: { work_items?: import('@/types').WorkItem[]; date?: string }): Promise<APIResponse<{
     overdue_count: number;
     high_priority_count: number;
     reminders: { type: string; item_id: number; title: string; message: string }[];
@@ -267,21 +254,21 @@ export const settingsAPI = {
 };
 
 export const workItemsAPI = {
-  listCategories: (): Promise<APIResponse<WorkCategory[]>> =>
+  listCategories: (): Promise<APIResponse<import('@/types').WorkCategory[]>> =>
     api.get('/work/categories'),
-
-  createCategory: (data: Partial<WorkCategory>): Promise<APIResponse<WorkCategory>> =>
+  
+  createCategory: (data: Partial<import('@/types').WorkCategory>): Promise<APIResponse<import('@/types').WorkCategory>> =>
     api.post('/work/categories', data),
-
-  updateCategory: (id: number, data: Partial<WorkCategory>): Promise<APIResponse<WorkCategory>> =>
+  
+  updateCategory: (id: number, data: Partial<import('@/types').WorkCategory>): Promise<APIResponse<import('@/types').WorkCategory>> =>
     api.put(`/work/categories/${id}`, data),
-
+  
   deleteCategory: (id: number): Promise<APIResponse<void>> =>
     api.delete(`/work/categories/${id}`),
-
+  
   initCategories: (): Promise<APIResponse<void>> =>
     api.post('/work/categories/init'),
-
+  
   list: (params?: {
     category_id?: number;
     status?: string;
@@ -291,34 +278,34 @@ export const workItemsAPI = {
     sort_by?: string;
     limit?: number;
     offset?: number;
-  }): Promise<APIResponse<WorkItem[]>> =>
+  }): Promise<APIResponse<import('@/types').WorkItem[]>> =>
     api.get('/work/items', { params }),
-
-  get: (id: number): Promise<APIResponse<WorkItem>> =>
+  
+  get: (id: number): Promise<APIResponse<import('@/types').WorkItem>> =>
     api.get(`/work/items/${id}`),
-
-  create: (data: CreateWorkItemRequest): Promise<APIResponse<WorkItem>> =>
+  
+  create: (data: import('@/types').CreateWorkItemRequest): Promise<APIResponse<import('@/types').WorkItem>> =>
     api.post('/work/items', data),
-
-  update: (id: number, data: Partial<CreateWorkItemRequest>): Promise<APIResponse<WorkItem>> =>
+  
+  update: (id: number, data: Partial<import('@/types').CreateWorkItemRequest>): Promise<APIResponse<import('@/types').WorkItem>> =>
     api.put(`/work/items/${id}`, data),
-
+  
   delete: (id: number): Promise<APIResponse<void>> =>
     api.delete(`/work/items/${id}`),
-
-  importTable: (table_text: string, project_id?: number): Promise<APIResponse<{ data: WorkItem[]; count: number }>> =>
+  
+  importTable: (table_text: string, project_id?: number): Promise<APIResponse<{ data: import('@/types').WorkItem[]; count: number }>> =>
     api.post('/work/import-table', { table_text, project_id }),
-
-  getLogs: (work_item_id?: number): Promise<APIResponse<WorkLog[]>> =>
+  
+  getLogs: (work_item_id?: number): Promise<APIResponse<import('@/types').WorkLog[]>> =>
     api.get('/work/logs', { params: work_item_id ? { work_item_id } : {} }),
-
-  getDailyPlan: (plan_date?: string, user_id?: number): Promise<APIResponse<DailyPlan>> =>
+  
+  getDailyPlan: (plan_date?: string, user_id?: number): Promise<APIResponse<import('@/types').DailyPlan>> =>
     api.get('/work/daily-plan', { params: { plan_date, user_id } }),
-
-  saveDailyPlan: (data: { plan_date: string; items_order?: string; ai_suggestions?: string; summary?: string; user_id?: number }): Promise<APIResponse<DailyPlan>> =>
+  
+  saveDailyPlan: (data: { plan_date: string; items_order?: string; ai_suggestions?: string; summary?: string; user_id?: number }): Promise<APIResponse<import('@/types').DailyPlan>> =>
     api.post('/work/daily-plan', data),
-
-  getStats: (): Promise<APIResponse<WorkStats>> =>
+  
+  getStats: (): Promise<APIResponse<import('@/types').WorkStats>> =>
     api.get('/work/stats'),
 };
 

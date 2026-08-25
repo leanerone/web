@@ -13,17 +13,6 @@ build/
 .env.local
 .env.*.local
 
-# Python virtual environments
-.venv/
-venv/
-ENV/
-env/
-.python-version
-
-# Pipenv / Poetry
-Pipfile.lock
-poetry.lock
-
 # IDE
 .vscode/
 .idea/

@@ -16,12 +16,7 @@ import { equipmentAPI, settingsAPI } from '@/services/api';
 import useAppStore from '@/stores/appStore';
 import type { Equipment } from '@/types';
 
-const mockEquipment: Equipment[] = [
-  { id: 1, ap_id: 1, ap_name: 'C01C021', eq_name: 'CATEOX-01', eq_type: 'CATEOX', eq_model: 'CATEOX-KEDJ-8350V', vendor: 'ASML', server_id: 'C01C021', driver_type: 'DL380 G10', driver_version: 'SRVTYPE:DL380 G10 OS:Win2019', snmp_ip: '192.168.1.101', snmp_port: '5101', driver1_ip: '192.168.1.101', driver1_port: 'COM1', driver2_ip: '192.168.11.11', driver2_port: '192.168.21.11', area: 'CVD', baud_rate: '9600', status: 'online', location: 'Fab-A / Line:T10 / Area:CVD', installed_at: '2024-07-02', updated_at: '2026-07-13' },
-  { id: 2, ap_id: 2, ap_name: 'C02C021', eq_name: 'GATEOX-01',  eq_type: 'GATEOX', eq_model: 'GATEOX-KEDJ-82800S', vendor: 'TEL', server_id: 'C02C021', driver_type: 'DL380 G9',  driver_version: 'SRVTYPE:DL380 G9 OS:Win2019',  snmp_ip: '192.168.2.101', snmp_port: '5201', driver1_ip: '192.168.2.101', driver1_port: 'COM2', driver2_ip: '192.168.12.11', driver2_port: '192.168.22.11', area: 'CMP', baud_rate: '9600', status: 'online', location: 'Fab-A / Line:T10 / Area:CMP', installed_at: '2024-07-03', updated_at: '2026-07-13' },
-  { id: 3, ap_id: 3, ap_name: 'C03C021', eq_name: 'CPC-01',     eq_type: 'CPC', eq_model: 'CPC-DNSA8S2000', vendor: 'DNS', server_id: 'C03C021', driver_type: 'DL380 G8', driver_version: 'SRVTYPE:DL380 G8 OS:Win2019', snmp_ip: '192.168.3.101', snmp_port: '5301', driver1_ip: '192.168.3.101', driver1_port: 'COM3', driver2_ip: '192.168.13.11', driver2_port: '192.168.23.11', area: 'PH', baud_rate: '9600', status: 'maintenance', location: 'Fab-A / Line:T10 / Area:PH', installed_at: '2024-07-04', updated_at: '2026-07-12' },
-  { id: 4, ap_id: 4, ap_name: 'C04C021', eq_name: 'TTOX-01',    eq_type: 'TTOX', eq_model: 'TTOX-OP5205T', vendor: 'Thermawave', server_id: 'C04C021', driver_type: 'DL380 G7', driver_version: 'SRVTYPE:DL380 G7 OS:Win2019', snmp_ip: '192.168.4.101', snmp_port: '5401', driver1_ip: '192.168.4.101', driver1_port: 'COM4', driver2_ip: '192.168.14.11', driver2_port: '192.168.24.11', area: 'ET', baud_rate: '9600', status: 'online', location: 'Fab-A / Line:T10 / Area:ET', installed_at: '2024-07-05', updated_at: '2026-07-13' },
-];
+const mockEquipment: Equipment[] = [];
 
 // 默认 Git Source 映射 (后端 SYSTEM_SETTINGS 未加载成功时的 fallback)
 const DEFAULT_GIT_BASE_URL = 'https://github.com/leanerone/web/blob/main/equipment';
@@ -160,8 +155,8 @@ export default function Equipment() {
           <Database className="w-4 h-4 text-cyan-600 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-cyan-700">
             <p className="font-medium">机台数据来源说明：</p>
-            <p>量产环境：自动对接 Oracle 生产库已有表 <code className="bg-white px-1 rounded border border-cyan-200">PANJOB.EQUIPMENTINFO</code>（通过只读视图映射，不会修改量产数据）。</p>
-            <p>本地演示：使用 init_oracle.sql 创建的 EQUIPMENT 表（80 台模拟数据）。</p>
+            <p>量产环境：后端 ORM 直接映射 <code className="bg-white px-1 rounded border border-cyan-200">PANJOB.EQUIPMENTINFO</code> 量产表 (用 PANJOB 账号直连)，前端只读展示，不会修改量产数据。</p>
+            <p>主键: <code>EQUIPMENT</code> (机台编号) ｜ 状态: 由 OS 字段派生 (Win → 在线, 其他 → 维护, NULL → 离线)</p>
           </div>
         </div>
 
@@ -257,8 +252,9 @@ export default function Equipment() {
               ) : (
                 filteredEquipment.map((item) => {
                   const gitUrl = buildGitUrl(item as any);
+                  const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
                   return (
-                    <tr key={item.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                    <tr key={eqKey} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
                       <td className="py-3 px-3 text-sm font-medium text-cyan-600 whitespace-nowrap">{item.eq_name}</td>
                       <td className="py-3 px-3 text-sm text-gray-700 whitespace-nowrap">{item.eq_type}</td>
                       <td className="py-3 px-3 text-sm text-gray-700 whitespace-nowrap">{item.eq_model}</td>
@@ -302,7 +298,7 @@ export default function Equipment() {
                         )}
                       </td>
                       <td className="py-3 px-3 whitespace-nowrap text-center">
-                        <Button variant="ghost" size="sm" onClick={() => navigate(`/equipment/${item.id}`)} title="查看详情">
+                        <Button variant="ghost" size="sm" onClick={() => navigate(`/equipment/${encodeURIComponent(eqKey)}`)} title="查看详情">
                           <Eye className="w-4 h-4" />
                         </Button>
                       </td>

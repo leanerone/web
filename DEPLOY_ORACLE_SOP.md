@@ -1,201 +1,149 @@
 # CIM Work Manager Oracle 生产环境部署 SOP
 
-> **适用版本**: v1.1.x（量产机台对接版，包含 EQUIPMENT 扩充 20 列 + Git Source 按钮）
-> **适用场景**: 新服务器部署本项目，连接 **Oracle 生产数据库**，**接入已存在的 PANJOB.EQUIPMENTINFO 量产机台表**（严禁新建/覆盖该表！）
-> **预估耗时**: 约 40 分钟（含 DBA 授权）
-> **执行角色**: DBA（步骤 0~1） + 应用运维（步骤 2~4）
+> **适用版本**: v1.2.x（PANJOB 直连版，EQUIPMENTINFO 真表直接映射）
+> **适用场景**: 新服务器部署本项目，连接 **Oracle 生产数据库**，用 **PANJOB 账号直连**，在 `PANJOB.EQUIPMENTINFO` 所在表空间创建业务表，前端直接读取展示量产机台数据
+> **预估耗时**: 约 15 分钟（无需 DBA，单步 SQL 部署）
+> **执行角色**: 应用运维（PANJOB 账号持有人）
 > **代码分支**: test1
 
 ---
 
 ## 目 录
 
-1. [机台管理当前数据源说明](#0-机台管理当前数据源说明)
-2. [DBA 授权：创建 CIM_WEB_USER 账号 + 授权访问 PANJOB.EQUIPMENTINFO](#1-dba-授权创建-cim_web_user-账号--授权访问-panjobequipmentinfo)
-3. [量产部署标准 3 步 SQL 流程](#2-量产部署标准-3-步-sql-流程)
+1. [方案核心说明](#0-方案核心说明)
+2. [部署前置条件](#1-部署前置条件)
+3. [单步 SQL 部署：init_oracle.sql](#2-单步-sql-部署init_oraclesql)
 4. [后端 Oracle 连接配置（.env）](#3-后端-oracle-连接配置env)
 5. [代码部署与启动验证](#4-代码部署与启动验证)
-6. [量产机台字段映射总览](#5-量产机台字段映射总览)
+6. [EQUIPMENTINFO 字段映射总览](#5-equipmentinfo-字段映射总览)
 7. [Git Source (SOURCECODE) 对接说明](#6-git-source-sourcecode-对接说明)
 8. [故障排查 FAQ](#7-故障排查-faq)
-9. [附录：初始化业务表一览](#8-附录初始化业务表一览-共-15-张-全部新建-不会碰生产表)
+9. [附录：业务表一览](#8-附录业务表一览)
 
 ---
 
-## 0. 机台管理当前数据源说明
+## 0. 方案核心说明
 
-> **先回答最关键的问题：机台管理现在的数据从哪里来？**
+> **先回答最关键的问题：机台管理的数据从哪里来？**
 
-| 环境 | 数据源 | 执行 SQL | 表/视图名 | 是否创建 PANJOB.EQUIPMENTINFO |
-|------|--------|----------|-----------|------------------------------|
-| **本地演示** (出厂默认) | init_oracle.sql 创建的本地 **EQUIPMENT 表** (80 行演示数据) | 仅第 2.1 步：`init_oracle.sql` | `EQUIPMENT` 真表 | ❌ 不会 |
-| **量产环境** (推荐，本 SOP 重点) | **生产库已存在的 `PANJOB.EQUIPMENTINFO`** 只读视图映射 | 第 2.1 + 2.2 步：init_oracle.sql 建 15 张业务表 → `prod_equipment_mapping.sql` **把占位 EQUIPMENT 表替换为同名视图**指向 `PANJOB.EQUIPMENTINFO` | `EQUIPMENT` 视图 (`SELECT * FROM PANJOB.EQUIPMENTINFO`) | ❌ **绝对不会！PANJOB.EQUIPMENTINFO 是生产库已存在的表，本项目只 GRANT SELECT，只读访问** |
-| **代码方案 B (备选)** | 后端 ORM 跨用户直连 `PANJOB.EQUIPMENTINFO` | 需改代码（`models.py` 加 `schema="PANJOB"`），不推荐 | — | ❌ 也不会，但需 DBA 额外赋 INSERT/UPDATE/DELETE（不建议） |
+**直接读取 PANJOB.EQUIPMENTINFO 量产真表，不建视图、不建中间表、不复制数据。**
 
-**【核心保证】**: 本项目所有 SQL 脚本 **绝不 CREATE / DROP / INSERT / UPDATE `PANJOB.EQUIPMENTINFO`**。
-对它的唯一操作只有：`GRANT SELECT` + `CREATE VIEW ... AS SELECT * FROM PANJOB.EQUIPMENTINFO`。
+| 项 | 说明 |
+|----|------|
+| 登录账号 | **PANJOB**（与 EQUIPMENTINFO 同账号，无需 DBA 额外授权） |
+| EQUIPMENTINFO | **生产真表，已存在且为量产数据**，本 SOP 绝不 CREATE/DROP/INSERT/UPDATE 它 |
+| 新建业务表位置 | **PANJOB 默认表空间 = EQUIPMENTINFO 所在表空间**（CREATE TABLE 不指定 TABLESPACE，自动落到 PANJOB 默认表空间） |
+| 后端 ORM | `Equipment.__tablename__ = "EQUIPMENTINFO"`，直接映射 18 列真表 |
+| 读取方式 | SQLAlchemy 只读 SELECT，**后端不提供 POST/PUT/DELETE 写操作路由** |
+| 状态字段 | EQUIPMENTINFO 无 `STATUS` 列，由 `OS` 字段派生：含 `Win` → online，NULL → offline，其他 → maintenance |
+| EQUIPMENT_TYPES | **视图**，`SELECT DISTINCT EQUIPMENTTYPE FROM EQUIPMENTINFO`，前端筛选下拉自动同步量产真实类型 |
+| 外键 | `CONFIGURATIONS.EQUIPMENT_NAME` 与 `REQUIREMENTS.EQUIPMENT_NAME` 引用 `EQUIPMENTINFO.EQUIPMENT`（VARCHAR2 主键） |
 
----
+**与旧方案对比（已废弃）：**
 
-## 1. DBA 授权：创建 CIM_WEB_USER 账号 + 授权访问 PANJOB.EQUIPMENTINFO
-
-> **⚠️ 本步骤需 DBA 在 SYS / PANJOB 用户执行一次，普通账号无法完成**
-
-### 1.1 (可选) 建表空间
-
-建议为 CIM Work Manager 创建独立表空间（示例使用 ASM，按实际存储修改）：
-
-```sql
--- 可选：业务表空间
-CREATE TABLESPACE TBS_CIM_WEB
-  DATAFILE '+DATA/proddb/datafile/tbs_cim_web_01.dbf' SIZE 2G AUTOEXTEND ON NEXT 512M MAXSIZE 32G
-  EXTENT MANAGEMENT LOCAL UNIFORM SIZE 1M
-  SEGMENT SPACE MANAGEMENT AUTO
-  LOGGING;
-GO
-
-CREATE TEMPORARY TABLESPACE TBS_CIM_WEB_TEMP
-  TEMPFILE '+DATA/proddb/tempfile/tbs_cim_web_temp_01.dbf' SIZE 512M AUTOEXTEND ON NEXT 128M MAXSIZE 8G;
-GO
-```
-
-> 若复用已有 `USERS` 表空间：跳过此步，后续 init_oracle.sql 把所有 `TABLESPACE USERS` 全局替换为目标表空间名即可。
-
-### 1.2 建业务账号 + 最小权限集
-
-```sql
--- DBA 在 SYS AS SYSDBA 下执行:
-CREATE USER CIM_WEB_USER
-  IDENTIFIED BY "StrongPassword@2026"        -- ← 替换为复杂密码
-  DEFAULT TABLESPACE TBS_CIM_WEB
-  TEMPORARY TABLESPACE TBS_CIM_WEB_TEMP
-  QUOTA UNLIMITED ON TBS_CIM_WEB;
-GO
-
--- 基础建表权限（仅部署期间需要，可建完回收）
-GRANT CREATE SESSION, CREATE TABLE, CREATE SEQUENCE,
-      CREATE PROCEDURE, CREATE TRIGGER, CREATE TYPE,
-      CREATE VIEW, CREATE SYNONYM
-   TO CIM_WEB_USER;
-GO
-
--- ====== 最关键：授权量产机台表【只读】访问 ======
--- ⚠️ 这是对生产表的唯一授权，仅限 SELECT！不会修改任何量产数据！
-GRANT SELECT ON PANJOB.EQUIPMENTINFO TO CIM_WEB_USER;
-GO
-```
-
-### 1.3 DBA 自检脚本
-
-```sql
--- 确认账号状态
-SELECT USERNAME, DEFAULT_TABLESPACE, ACCOUNT_STATUS
-  FROM DBA_USERS WHERE USERNAME='CIM_WEB_USER';
-GO
-
--- 确认系统权限
-SELECT PRIVILEGE FROM DBA_SYS_PRIVS
- WHERE GRANTEE='CIM_WEB_USER' ORDER BY 1;
-GO
-
--- 最关键：确认量产表 SELECT 权限已在
-SELECT TABLE_SCHEMA, TABLE_NAME, PRIVILEGE
-  FROM DBA_TAB_PRIVS
- WHERE GRANTEE='CIM_WEB_USER'
-   AND TABLE_SCHEMA='PANJOB'
-   AND TABLE_NAME='EQUIPMENTINFO';
-GO
--- 预期 1 行:  PANJOB | EQUIPMENTINFO | SELECT
-```
+| 旧方案 (v1.1) | 新方案 (v1.2，本 SOP) |
+|---------------|----------------------|
+| 用 CIM_WEB_USER 独立账号 | **用 PANJOB 账号直连** |
+| 建 EQUIPMENT 占位表 + 视图映射 | **不建 EQUIPMENT 表，ORM 直接映射真表** |
+| 两步 SQL（init + prod_mapping） | **单步 SQL（init_oracle.sql）** |
+| 需要 DBA GRANT SELECT | **不需要，PANJOB 自己就是 owner** |
+| 需要 DBA 创建 CIM_WEB_USER 账号 | **不需要 DBA 介入** |
 
 ---
 
-## 2. 量产部署标准 3 步 SQL 流程
+## 1. 部署前置条件
 
-> 全程 **Aqua Data Studio 登录 `CIM_WEB_USER`**，确保 `GO` 批分隔符生效（ADS F5 = 整文件执行）。
+### 1.1 账号与权限
 
-### 2.1 步骤 1：执行 init_oracle.sql — 建 15 张业务表 + 插入基础数据
+| 项 | 要求 |
+|----|------|
+| Oracle 账号 | **PANJOB**（即 EQUIPMENTINFO 表的 owner） |
+| 权限 | PANJOB 默认拥有：CREATE SESSION / CREATE TABLE / CREATE VIEW / CREATE SEQUENCE / CREATE TRIGGER / CREATE PROCEDURE / CREATE TYPE |
+| 表空间配额 | PANJOB 默认表空间无配额限制（owner 默认 UNLIMITED） |
+| DBA 介入 | **无需 DBA 介入**（除非 PANJOB 密码忘记需重置） |
+
+### 1.2 验证 PANJOB 账号可用
+
+用 Aqua Data Studio (ADS) 或 sqlplus 以 PANJOB 登录，执行：
+
+```sql
+-- 应返回当前用户 = PANJOB
+SELECT USER FROM DUAL;
+GO
+
+-- 应返回 EQUIPMENTINFO 的行数 (>0 即可)
+SELECT COUNT(*) FROM EQUIPMENTINFO;
+GO
+
+-- 应返回 PANJOB 默认表空间名 (= EQUIPMENTINFO 所在表空间)
+SELECT DEFAULT_TABLESPACE FROM USER_USERS;
+GO
+
+-- 确认 PANJOB 有 CREATE TABLE/VIEW 权限
+SELECT PRIVILEGE FROM USER_SYS_PRIVS ORDER BY 1;
+GO
+```
+
+若以上 4 条全部正常通过，即可进入第 2 步部署。
+
+---
+
+## 2. 单步 SQL 部署：init_oracle.sql
+
+> 全程 **Aqua Data Studio 登录 `PANJOB`**，确保 `GO` 批分隔符生效（ADS F5 = 整文件执行）。
+
+### 2.1 执行 init_oracle.sql
 
 | 项目 | 值 |
 |------|----|
 | 文件 | `backend/data/init_oracle.sql` |
-| 登录用户 | `CIM_WEB_USER`（**不是 SYS/PANJOB！**） |
+| 登录用户 | **PANJOB**（**不是 SYS/SYSTEM！**） |
 | ADS 执行方式 | **F5 / 双箭头 ▶️▶️（整文件执行，识别每个 GO 为一个块）** |
-| 建表数量 | 15 张业务表 + 2 张机台占位表（`EQUIPMENT` / `EQUIPMENT_TYPES`） |
-| 基础数据 | 项目 5 条 / 任务 8 条 / 需求 5 条 / 用户 3 条 / 系统设置 7 条 / 工作类别 8 条 / 机台类型 8 条 / **演示机台 80 条** |
+| 建表数量 | **13 张业务表 + 1 个类型视图 (EQUIPMENT_TYPES)** |
+| 是否建 EQUIPMENTINFO | **❌ 绝不！该表已存在且为生产数据** |
+| 基础数据 | 项目 5 / 任务 8 / 需求 5 / 用户 3 / 系统设置 9 / 工作类别 8 (机台数据不插入，直接用 EQUIPMENTINFO 真表) |
 
 **执行前 3 检查：**
-- ✅ ADS 顶栏显示连接用户是 `CIM_WEB_USER`（脚本第 0 段 SQL 也会打印 `CUR_USER`，不对请中止）
-- ✅ 目标表空间名：若不使用默认 `USERS`，先在 init_oracle.sql 中全局替换 `TABLESPACE USERS` → `TABLESPACE TBS_CIM_WEB`
-- ✅ 非 Oracle 12c：若为 Oracle 11g，把所有 `GENERATED BY DEFAULT ON NULL AS IDENTITY` 改为 FAQ 第 4 节的 SEQUENCE + TRIGGER 方案
+- ✅ ADS 顶栏显示连接用户是 `PANJOB`（脚本第 0 段会打印 `CUR_USER` 与 `EQUIPMENTINFO_ROWS`，不对请中止）
+- ✅ `EQUIPMENTINFO_ROWS > 0`（脚本会自检，为 0 或报 ORA-00942 会中止）
+- ✅ 非 Oracle 12c：若为 Oracle 11g，把所有 `GENERATED BY DEFAULT ON NULL AS IDENTITY` 改为 FAQ 第 6 节的 SEQUENCE + TRIGGER 方案
 
-**执行结果验收（脚本尾部自动打印）：**
+### 2.2 init_oracle.sql 脚本结构
+
+| 段 | 内容 |
+|----|------|
+| 段 0 | 执行环境自检：当前用户、EQUIPMENTINFO 行数 |
+| 段 1 | DROP 既有业务表 (PL/SQL 动态 DROP，不存在不报错，**严禁 DROP EQUIPMENTINFO**) |
+| 段 2 | CREATE 13 张业务表 + 1 个 EQUIPMENT_TYPES 视图 |
+| 段 3 | INSERT 业务基础数据 (项目/任务/需求/用户/系统设置/工作类别，**不插入机台**) |
+| 段 4 | 执行结果自检 (15 行行数统计) |
+
+### 2.3 执行结果验收（脚本尾部自动打印）
 
 | 表名 | 预期行数 | 说明 |
 |------|---------|------|
-| PROJECTS | 5 | |
-| TASKS | 8 | |
-| EQUIPMENT_TYPES | 8 | （步骤 2 会 RENAME 为备份，再建同名视图） |
-| **EQUIPMENT** | **80** | （步骤 2 会 RENAME 为备份 `EQUIPMENT_LOCAL_BAK`，再建同名视图 → 量产） |
-| REQUIREMENTS | 5 | |
+| PROJECTS | 5 | 业务种子数据 |
+| TASKS | 8 | 业务种子数据 |
+| **EQUIPMENT_TYPES** | 量产类型去重数 | **视图**，从 EQUIPMENTINFO 去重 EQUIPMENTTYPE |
+| **EQUIPMENTINFO** | 量产真实机台数 | **生产真表，不受脚本影响** |
+| CONFIGURATIONS | 0 | |
+| REQUIREMENTS | 5 | 业务种子数据 |
+| CHANGE_RECORDS | 0 | |
+| REPORTS | 0 | |
+| NOTES_DOCUMENTS | 0 | |
 | USERS | 3 | administrator / eap.engineer / cim.user |
-| SYSTEM_SETTINGS | 7 | general/ai/notes 默认 |
-| WORK_CATEGORIES | 8 | 工作类别字典 |
-| 其他 7 张 | 0 | CONFIGURATIONS / CHANGE_RECORDS / REPORTS / NOTES_DOCUMENTS / WORK_ITEMS / DAILY_PLANS / WORK_LOGS |
+| SYSTEM_SETTINGS | 9 | 含 `git_source_base_url` + `git_source_map` 2 条 |
+| WORK_CATEGORIES | 8 | |
+| WORK_ITEMS | 0 | |
+| DAILY_PLANS | 0 | |
+| WORK_LOGS | 0 | |
 
-> ⚠️ **如果 EQUIPMENT 创建失败，不要继续步骤 2！** 先修复 15 张表结构，再往下走。
+**关键判定：**
+- ✅ `EQUIPMENTINFO` 行数 = 量产真实机台数（脚本前后不变）
+- ✅ `EQUIPMENT_TYPES` 行数 = 量产 EQUIPMENTTYPE 去重数（不是固定的 8）
+- ✅ 13 张业务表全部存在，行数符合预期
 
-### 2.2 步骤 2：执行 prod_equipment_mapping.sql — 替换 EQUIPMENT 为量产视图（核心动作）
-
-| 项目 | 值 |
-|------|----|
-| 文件 | `backend/data/prod_equipment_mapping.sql` |
-| 登录用户 | `CIM_WEB_USER` |
-| **前提** | 步骤 1 执行完毕，且 DBA 已 `GRANT SELECT ON PANJOB.EQUIPMENTINFO TO CIM_WEB_USER` |
-| 作用 | 把步骤 1 创建的占位 `EQUIPMENT/EQUIPMENT_TYPES` 表 **RENAME 备份**，再建**同名只读视图**，让后端查 `EQUIPMENT` 时实际读到 `PANJOB.EQUIPMENTINFO` |
-| 额外动作 | 写入 `git_source_base_url` + `git_source_map` 两条配置到 `SYSTEM_SETTINGS`，供前端 Git Source 按钮使用 |
-
-**脚本 5 大阶段（自动串行执行）：**
-1. **自检**（段 0）：输出当前用户 + 是否拥有 PANJOB.EQUIPMENTINFO 的 SELECT 权限，为 `NO` 请先让 DBA 授权
-2. **备份**（段 1）：`EQUIPMENT → EQUIPMENT_LOCAL_BAK`，`EQUIPMENT_TYPES → EQUIPMENT_TYPES_LOCAL_BAK`（PL/SQL 安全 RENAME，已不存在也不报错）
-3. **建类型视图**（段 2）：`EQUIPMENT_TYPES` 视图，`SELECT DISTINCT EQUIPMENTTYPE FROM PANJOB.EQUIPMENTINFO`
-4. **建机台主视图**（段 3）：`EQUIPMENT` 视图，输出 **ORM 核心 8 列 + 量产 20 列**（见第 5 节字段映射），`LEFT JOIN EQUIPMENT_TYPES` 视图取 TYPE_ID，`OS` 映射 `STATUS`，拼接 `LOCATION`
-5. **写 Git Source 映射**（段 4）：UPSERT 两条 SYSTEM_SETTINGS（重复执行不会重复插入，最新值覆盖）
-
-**脚本尾部 3 大校验（自动执行，必看结果）：**
-
-```
-① 行数对比（应一致）:
-  PANJOB.EQUIPMENTINFO      = 真实量产机台数
-  EQUIPMENT(VIEW→量产)       = 应与上行相等 ✅  (不等 = GRANT 失败或视图错)
-  EQUIPMENT_TYPES(VIEW)     = 类型去重数
-
-② 抽样 8 行:
-  机台编号 / 类型 / 型号 / 厂区 / 产线 / CC服务器 / 负责人 / 操作系统 / 服务器类型 / SOURCE / 状态
-  (列必须全部有值，才代表 20 列映射正确)
-
-③ SOURCECODE → Git URL 抽样（只展示有 SOURCECODE 的 10 行）:
-  机台编号 / SOURCECODE / 期望GitURL
-  (期望GitURL 为空 = SYSTEM_SETTINGS 中 git_source_map 缺此 SOURCECODE 值，第 6 节补)
-```
-
-**结论判定：**
-- ✅ 行数相等 + 抽样 12 列全部非空 = 步骤 2 成功，可以上线
-- ❌ 行数 = 0 → 99% 是 DBA 还没 GRANT SELECT，回到 1.2 节补授权
-- ❌ 视图创建报 `ORA-00942 table or view does not exist` on `PANJOB.xxx` → 同 GRANT 缺失
-- ❌ ORA-00955 名称已被现有对象使用 → `PURGE RECYCLEBIN` 再跑
-
-### 2.3 步骤 3：（可选安全加固）DBA 回收高危权限
-
-> 15 张业务表 + 2 个视图都创建成功后，推荐回收 DDL 权限，只保留 DML（应用运行只需 SELECT/INSERT/UPDATE/DELETE）。DBA 在 SYS 执行：
-
-```sql
-REVOKE CREATE TABLE, CREATE SEQUENCE, CREATE PROCEDURE,
-       CREATE TRIGGER, CREATE TYPE, CREATE VIEW, CREATE SYNONYM
-  FROM CIM_WEB_USER;
-GO
--- 保留：CREATE SESSION (登录)
-```
+**单步部署完成！直接进入第 3 步配置 .env 即可启动。**
 
 ---
 
@@ -218,10 +166,16 @@ cp .env.oracle.example .env
 
 ```dotenv
 DATABASE_TYPE=oracle
-ORACLE_USER=CIM_WEB_USER
-ORACLE_PASSWORD=StrongPassword@2026
+ORACLE_USER=PANJOB
+ORACLE_PASSWORD=YourPanjobPassword
 ORACLE_DSN=10.20.30.40:1521/ORCL
 ```
+
+> ⚠️ **必须用 PANJOB 账号**，不能用 SYS/SYSTEM/其他账号。原因：
+> - 后端 ORM `Equipment.__tablename__ = "EQUIPMENTINFO"`，不带 schema 前缀
+> - SQLAlchemy 连接后默认 schema = 当前登录用户
+> - 用 PANJOB 登录，SQL 会自动解析为 `PANJOB.EQUIPMENTINFO`
+> - 用其他账号登录会报 `ORA-00942: table or view does not exist`
 
 **ORACLE_DSN 格式：**
 
@@ -231,7 +185,6 @@ ORACLE_DSN=10.20.30.40:1521/ORCL
 | 单机 Service Name | `10.20.30.40:1521/PROD_SVC.company.com` |
 | RAC SCAN + Service | `scan-vip.company.com:1521/PROD_SVC` |
 | TNS Name（本机 tnsnames.ora 有） | `PROD_TNS` |
-| TCPS SSL | `(DESCRIPTION=(ADDRESS=(PROTOCOL=TCPS)(HOST=x)(PORT=2484))(CONNECT_DATA=(SERVICE_NAME=ORCL)))` |
 
 > 密码含特殊字符：直接写，不要加引号（pydantic-settings 会自动处理）。
 
@@ -282,27 +235,35 @@ if settings.database_type == 'oracle':
     print(f'User/DSN: {settings.oracle_user} @ {settings.oracle_dsn}')
 
 with engine.connect() as conn:
-    # ① 15 张业务表 (含 SYSTEM_SETTINGS)
-    r = conn.execute(text("SELECT COUNT(*) FROM USER_TABLES")).fetchone()
-    print(f'用户下对象表数: {r[0]}  (≥15 OK)')
+    # ① 当前用户应为 PANJOB
+    r = conn.execute(text('SELECT USER FROM DUAL')).fetchone()
+    print(f'当前用户: {r[0]}  (应为 PANJOB)')
 
-    # ② 关键：EQUIPMENT 行数 = 应等于量产 PANJOB.EQUIPMENTINFO 行数！
-    r = conn.execute(text("SELECT COUNT(*) FROM EQUIPMENT")).fetchone()
-    print(f'EQUIPMENT 行数: {r[0]}  (等于量产表行数 OK, =0 GRANT 失败, =80 只跑了 init 没跑 step2)')
+    # ② EQUIPMENTINFO 行数 = 量产真实机台数
+    r = conn.execute(text('SELECT COUNT(*) FROM EQUIPMENTINFO')).fetchone()
+    print(f'EQUIPMENTINFO 行数: {r[0]}  (量产真实机台数)')
 
-    # ③ 抽样验证 20 列都能读 (会报列不存在, 就说明视图列名没对齐)
-    r = conn.execute(text("SELECT ID, EQUIPMENT, EQUIPMENTTYPE, EQUIPMENTMODEL, AREA, LINE, CCSERVER, CHARGEMAN, OS, SRVTYPE, SOURCECODE, STATUS FROM EQUIPMENT WHERE ROWNUM<=1")).fetchone()
-    print(f'20 列抽样 OK: {r}')
-print('\\u2713 Oracle 连接 + 量产视图 自检通过')
+    # ③ 13 张业务表存在性检查
+    r = conn.execute(text('SELECT COUNT(*) FROM USER_TABLES')).fetchone()
+    print(f'业务表数: {r[0]}  (>=13 OK)')
+
+    # ④ EQUIPMENT_TYPES 视图存在 + 行数 = 类型去重数
+    r = conn.execute(text('SELECT COUNT(*) FROM EQUIPMENT_TYPES')).fetchone()
+    print(f'EQUIPMENT_TYPES(视图) 行数: {r[0]}  (类型去重数)')
+
+    # ⑤ 抽样验证 18 列都能读 (会报列不存在, 就说明列名没对齐)
+    r = conn.execute(text('SELECT EQUIPMENT, EQUIPMENTTYPE, EQUIPMENTMODEL, AREA, LINE, CCSERVER, CHARGEMAN, OS, SRVTYPE, SOURCECODE FROM EQUIPMENTINFO WHERE ROWNUM<=1')).fetchone()
+    print(f'18 列抽样 OK: EQUIPMENT={r[0]} TYPE={r[1]} MODEL={r[2]} AREA={r[3]}')
+print('OK - PANJOB 直连 + EQUIPMENTINFO 自检通过')
 "@ | Out-File -Encoding UTF8 test_oracle_equipment.py
 
 .\venv\Scripts\python.exe test_oracle_equipment.py
 ```
 
 **输出判定：**
-- EQUIPMENT 行数 = `80` → **只跑了 step1 init_oracle.sql，没跑 step2 映射视图！** 回去执行 step2。
-- EQUIPMENT 行数 = `0` → DBA 没 GRANT，回去 1.2 补。
-- EQUIPMENT 行数 = 量产真实行数 (例如 1500) + 20 列抽样没抛错 = ✅ 可以启服务。
+- 当前用户 = `PANJOB` → ✅ 否则改 .env
+- EQUIPMENTINFO 行数 = 量产真实行数 (例如 1500) → ✅
+- 18 列抽样没抛错 = ✅ 可以启服务
 
 ### 4.3 启动服务 & 功能验证
 
@@ -318,6 +279,7 @@ npm run dev
 ```
 
 **登录账号（init_oracle.sql 已创建）：**
+
 | 用户名 | 角色 | 初始密码 |
 |--------|------|---------|
 | `administrator` | admin | 空 / 首次登录后系统设置里重置 |
@@ -328,65 +290,80 @@ npm run dev
 
 | # | 验证项 | 方法 | 通过条件 |
 |---|--------|------|---------|
-| 1 | 机台总数 | 进入页面看"机台统计"卡片 | 等于量产表真实行数（而非 80） ✅ |
+| 1 | 机台总数 | 进入页面看"机台统计"卡片 | 等于量产表真实行数 |
 | 2 | 类型筛选 | 顶部筛选器 | 下拉为量产真实 EQUIPMENTTYPE 去重列表 |
 | 3 | 搜索 | 输入机台编号/CC服务器/SOURCECODE | 列表实时过滤匹配 |
-| 4 | 状态映射 | 查看状态徽标 | Win → 在线，其他 OS → 维护/离线 (见视图 CASE WHEN) |
-| 5 | 20 列展示 | 看 14 列表头 | 机台编号 / 类型 / 型号 / 厂区 / 产线 / CC服务器 / 负责人 / 操作系统 / 服务器类型 / SOURCE / 状态 / 位置 全部有值 |
-| 6 | **Git Source 按钮** | 点每行 🐙 图标 | 新标签页跳转到 `git_source_base_url` + `git_source_map[SOURCECODE]`，HTTP 200 |
+| 4 | 状态映射 | 查看状态徽标 | OS=Win → 在线，其他 OS → 维护，NULL → 离线 |
+| 5 | 18 列展示 | 看 14 列表头 | 机台编号 / 类型 / 型号 / 厂区 / 产线 / CC服务器 / 负责人 / 操作系统 / 服务器类型 / SOURCE / 状态 / 位置 全部有值 |
+| 6 | **Git Source 按钮** | 点每行 🐙 图标 | 新标签页跳转到 `git_source_base_url` + `git_source_map[SOURCECODE]` |
 | 7 | 导出 CSV | 点"导出CSV" | 文件名 `equipment_list_YYYY-MM-DD.csv`，所有 14 列（含 GitURL）完整 |
-| 8 | API 验证 | `GET /api/equipment?limit=5` | 返回 JSON 含 `eq_name, source_code, line, chargeman, os` 等字段 |
+| 8 | API 验证 | `GET /api/equipment?limit=5` | 返回 JSON 含 `equipment, equipment_type, source_code, line, chargeman, os` 等字段 |
+| 9 | 只读验证 | 尝试 `POST /api/equipment` | 应返回 405 Method Not Allowed（无写路由） |
 
 ---
 
-## 5. 量产机台字段映射总览
+## 5. EQUIPMENTINFO 字段映射总览
 
-### 5.1 列名对齐关系（EQUIPMENT 视图 → ORM → Pydantic → 前端）
+### 5.1 列名对齐关系（Oracle EQUIPMENTINFO → ORM → Pydantic → 前端）
 
 ```
-Oracle VIEW 列名            SQLAlchemy models.py          Pydantic schema             前端字段
-────────────────────────    ─────────────────────────     ──────────────────         ──────────────
-ID                          id                            id                          id (+ ap_id computed)
-TYPE_ID                     type_id                       type_id                      —
-NAME                        name                          name (+ eq_name computed)   eq_name (优先用 equipment)
-LOCATION                    location                      location                     location
-STATUS                      status                        status                       status
-DRIVER_VERSION              driver_version                driver_version               driver_version
-INSTALLED_AT                installed_at                  installed_at                 installed_at
-UPDATED_AT                  updated_at                    updated_at                   updated_at
-── 量产 18 列 (大写列名严格一致) ────────────────────────────────────────────────────────────────
-EQUIPMENT                   equipment                     equipment                    eq_name (主字段)
-EQUIPMENTTYPE 👉            equipment_type                equipment_type               eq_type (computed)
-EQUIPMENTMODEL 👉           equipment_model               equipment_model              eq_model (computed)
-LINE          👉            line                          line                         line
-CCSERVER      👉            cc_server                     cc_server                    server_id (=ap_name)
-AREA          👉            area                          area                         area
-MOXA          👉            moxa                          moxa                         baud_rate
-NPORT         👉            nport                         nport                        snmp_port
-NPORTIP       👉            nport_ip                      nport_ip                     snmp_ip/driver1_ip
-NPORTCOM      👉            nport_com                     nport_com                    driver1_port
-CHARGEMAN     👉            chargeman                     chargeman                    chargeman
-SMIF1NPORTIP  👉            smif1_nport_ip                smif1_nport_ip               driver2_ip
-SMIF2NPORTIP  👉            smif2_nport_ip                smif2_nport_ip               driver2_port
-SMIF3NPORTIP  👉            smif3_nport_ip                smif3_nport_ip               —
-SMIF4NPORTIP  👉            smif4_nport_ip                smif4_nport_ip               —
-OS            👉            os                            os                           os (同时决定 status)
-SRVTYPE       👉            srv_type                      srv_type                     driver_type (=ap_name)
-SOURCECODE    👉            source_code                   source_code                  🔘 Git Source 按钮
-── 预留 2 列 ─────────────────────────────────────────────────────────────────────────────────
-EXTRA19                     extra_19                      extra_19                     —
-EXTRA20                     extra_20                      extra_20                     —
+Oracle EQUIPMENTINFO 列    SQLAlchemy models.py          Pydantic schema             前端字段
+──────────────────────    ─────────────────────────     ──────────────────         ──────────────
+EQUIPMENT (PK)            equipment                     equipment                    eq_name (computed)
+EQUIPMENTTYPE             equipment_type                equipment_type               eq_type (computed)
+EQUIPMENTMODEL            equipment_model               equipment_model              eq_model (computed)
+LINE                      line                          line                         line
+CCSERVER                  cc_server                     cc_server                    server_id (computed)
+AREA                      area                          area                         area
+MOXA                      moxa                          moxa                         baud_rate (computed)
+NPORT                     nport                         nport                        snmp_port (computed)
+NPORTIP                   nport_ip                      nport_ip                     snmp_ip / driver1_ip (computed)
+NPORTCOM                  nport_com                     nport_com                    driver1_port (computed)
+CHARGEMAN                 chargeman                     chargeman                    chargeman
+SMIF1NPORTIP              smif1_nport_ip                smif1_nport_ip               driver2_ip (computed)
+SMIF2NPORTIP              smif2_nport_ip                smif2_nport_ip               driver2_port (computed)
+SMIF3NPORTIP              smif3_nport_ip                smif3_nport_ip               —
+SMIF4NPORTIP              smif4_nport_ip                smif4_nport_ip               —
+OS                        os                            os                           os (同时决定 status)
+SRVTYPE                   srv_type                      srv_type                     driver_type (computed)
+SOURCECODE                source_code                   source_code                  🔘 Git Source 按钮
+
+── 派生字段 (后端 @computed_field，非真实列) ────────────────────────────────
+—                         —                             id (= equipment)             id / key
+—                         —                             eq_name (= equipment)        eq_name
+—                         —                             status (由 OS 派生)          status
+—                         —                             location (Line/Area 拼接)    location
+—                         —                             ap_id / ap_name / vendor 等   前端兼容字段
 ```
 
 ### 5.2 EQUIPMENT_TYPES 视图映射
 
+```sql
+CREATE OR REPLACE VIEW EQUIPMENT_TYPES AS
+SELECT ROWNUM AS ID, EQUIPMENTTYPE AS NAME,
+       '量产机台类型: ' || EQUIPMENTTYPE AS DESCRIPTION,
+       NULL AS MANUFACTURER
+  FROM (SELECT DISTINCT EQUIPMENTTYPE FROM EQUIPMENTINFO
+         WHERE EQUIPMENTTYPE IS NOT NULL ORDER BY EQUIPMENTTYPE)
 ```
-VIEW 列      models.py            前端用途
-─────────    ───────────          ──────────────────
-ID           EquipmentType.id     筛选 + ORM外键TYPE_ID
-NAME         EquipmentType.name   =EQUIPMENTTYPE (例: PECVD)
-DESCRIPTION  EquipmentType.desc   = '量产机台类型: xxx' 说明
-MANUFACTURER EquipmentType.mfr    NULL (量产表没厂商字段)
+
+| VIEW 列 | models.py | 前端用途 |
+|---------|-----------|---------|
+| ID | EquipmentType.id | ORM 读取 (类型筛选) |
+| NAME | EquipmentType.name | = EQUIPMENTTYPE (例: PECVD) |
+| DESCRIPTION | EquipmentType.description | 说明文字 |
+| MANUFACTURER | EquipmentType.manufacturer | NULL (量产表无此字段) |
+
+### 5.3 状态派生规则 (EQUIPMENTINFO 无 STATUS 列)
+
+```python
+@computed_field
+@property
+def status(self) -> str:
+    """OS 含 Win → online, NULL → offline, 其他 → maintenance"""
+    if not self.os:
+        return "offline"
+    return "online" if "WIN" in self.os.upper() else "maintenance"
 ```
 
 ---
@@ -395,13 +372,13 @@ MANUFACTURER EquipmentType.mfr    NULL (量产表没厂商字段)
 
 ### 6.1 跳转规则
 
-量产表 `SOURCECODE` 是源码分类码（例：1=光刻机驱动，2=PECVD，3=刻蚀机...），前端用它拼接最终 Git URL：
+量产表 `SOURCECODE` 是源码分类码，前端用它拼接最终 Git URL：
 
 ```
 GIT_URL = git_source_base_url + '/' + git_source_map[ SOURCECODE ]
 ```
 
-这两个配置存在 `SYSTEM_SETTINGS` 表（category='equipment'），`prod_equipment_mapping.sql` 第 4 段已写入默认值：
+这两个配置存在 `SYSTEM_SETTINGS` 表（category='equipment'），init_oracle.sql 第 3.5 段已写入默认值：
 
 | Key | 默认值 |
 |-----|--------|
@@ -410,7 +387,7 @@ GIT_URL = git_source_base_url + '/' + git_source_map[ SOURCECODE ]
 
 ### 6.2 修改映射（生产环境真实值）
 
-用 CIM_WEB_USER 在 ADS 执行 UPDATE（不影响量产表！只改 SYSTEM_SETTINGS）：
+用 PANJOB 在 ADS 执行 UPDATE（不影响 EQUIPMENTINFO 量产数据！只改 SYSTEM_SETTINGS）：
 
 ```sql
 UPDATE SYSTEM_SETTINGS
@@ -423,15 +400,15 @@ UPDATE SYSTEM_SETTINGS
                  "7":"drivers/lam_etch_kiyo",
                  "8":"drivers/cvd_amat_centura"}'
  WHERE KEY = 'git_source_map'
-   AND CATEGORY = 'equipment';
+   AND CATEGORY = 'equipment'
 GO
-COMMIT;
+COMMIT
 GO
 ```
 
-然后刷新前端页面或重调 `settingsAPI.list('equipment')`，Git Source 按钮会立即用新映射。
+刷新前端页面或重调 `settingsAPI.list('equipment')`，Git Source 按钮立即用新映射。
 
-### 6.3 前端实现细节（不用改）
+### 6.3 前端实现（不用改）
 
 - `Equipment.tsx` 加载机台时并行调用 `GET /api/settings?category=equipment` 拉两条配置
 - 失败 fallback 到 `DEFAULT_GIT_BASE_URL / DEFAULT_GIT_SOURCE_MAP` (代码内常量)
@@ -441,39 +418,37 @@ GO
 
 ## 7. 故障排查 FAQ
 
-### Q1. `SELECT COUNT(*) FROM EQUIPMENT` 返回 **80**（演示数据行数，不是量产）
-**原因**：只执行了 step1 `init_oracle.sql`，**没跑 step2 `prod_equipment_mapping.sql`**。  
-**处理**：立即 `CIM_WEB_USER` 登录 ADS，F5 跑 `prod_equipment_mapping.sql`，跑完再查应该变成量产真实行数。
+### Q1. 报 `ORA-00942: table or view does not exist` on `EQUIPMENTINFO`
+**原因**：.env 中 `ORACLE_USER` 不是 PANJOB（用其他账号登录，schema 不对）。  
+**处理**：改 .env 中 `ORACLE_USER=PANJOB`，重启后端。SQLAlchemy 不带 schema 前缀，必须用 owner 账号登录。
 
-### Q2. `SELECT COUNT(*) FROM EQUIPMENT` = 0
-**99% 原因**：DBA 还没执行 `GRANT SELECT ON PANJOB.EQUIPMENTINFO TO CIM_WEB_USER;`。  
-**自检**：在 ADS 中直接跑 `SELECT COUNT(*) FROM PANJOB.EQUIPMENTINFO;` → 报 `ORA-00942: table or view does not exist` 就是没权限。
+### Q2. init_oracle.sql 段 0 自检中止：EQUIPMENTINFO_ROWS = 0
+**两种情况：**
+- 当前账号不是 PANJOB（看 CUR_USER 输出）→ 改 ADS 连接
+- PANJOB 下确实没有 EQUIPMENTINFO 表（极少见）→ 找 DBA 确认表 owner
 
-### Q3. `ORA-00955: 名称已由现有对象使用` on RENAME 或 CREATE VIEW
-**处理**：
+### Q3. `ORA-00955: 名称已由现有对象使用` on CREATE TABLE
+**原因**：表已存在，重复执行 init_oracle.sql。  
+**处理**：脚本段 1 的 PL/SQL 动态 DROP 应该已自动处理，若仍报错：
 ```sql
-PURGE RECYCLEBIN;
-GO
--- 手动清已残留的视图
-DECLARE
-  PROCEDURE drop_view_if_exists(v VARCHAR2) IS BEGIN EXECUTE IMMEDIATE 'DROP VIEW '||v;
-  EXCEPTION WHEN OTHERS THEN IF SQLCODE!=-942 THEN RAISE; END IF; END;
-BEGIN drop_view_if_exists('EQUIPMENT'); drop_view_if_exists('EQUIPMENT_TYPES'); END;
+PURGE RECYCLEBIN
 GO
 ```
-然后重跑 prod_equipment_mapping.sql。
+再重跑 init_oracle.sql。
 
-### Q4. 前端页面机台统计卡片显示"80 台"（量产环境不对）
-**原因**：后端 `.env` 是 SQLite（或 DATABASE_TYPE 没写 oracle）。  
-**处理**：改 `.env` 中 `DATABASE_TYPE=oracle`，重启后端；再查 `GET /api/equipment` 是否返回量产数据。
+### Q4. 前端页面机台统计卡片显示 0 台
+**原因排查**：
+- 后端 `.env` 是 SQLite（DATABASE_TYPE=sqlite）→ 改为 oracle 重启
+- 后端连的不是 PANJOB → 报 ORA-00942，看后端日志
+- `GET /api/equipment` 返回 success=false → 看后端日志的 SQL 错误
 
-### Q5. 前端 Git Source 按钮灰色，点不开
+### Q5. 前端 Git Source 按钮灰色
 **两种情况：**
 - 机台的 `SOURCECODE` = NULL（量产表没填），正常：请在 MES/EAP 量产表补 SOURCECODE
-- `SOURCECODE` 有值，但 `git_source_map` JSON 中缺对应 key → 按 6.2 节 UPDATE SYSTEM_SETTINGS 加入该 key
+- `SOURCECODE` 有值但 `git_source_map` JSON 缺对应 key → 按 6.2 节 UPDATE SYSTEM_SETTINGS 加入该 key
 
 ### Q6. Oracle 11g 兼容：IDENTITY 不支持
-所有 `GENERATED BY DEFAULT ON NULL AS IDENTITY` 改为 SEQUENCE + TRIGGER，见 Q7 例子。
+所有 `GENERATED BY DEFAULT ON NULL AS IDENTITY` 改为 SEQUENCE + TRIGGER：
 
 ```sql
 -- ID 列: ID NUMBER(10) PRIMARY KEY  (去掉 IDENTITY 声明) + 追加:
@@ -484,7 +459,7 @@ CREATE OR REPLACE TRIGGER TRG_PROJECTS_BI
 BEGIN SELECT SEQ_PROJECTS_ID.NEXTVAL INTO :NEW.ID FROM DUAL; END;
 GO
 ```
-15 张表需要 15 × 2 = 30 个对象，需要脚本可直接让 DBA 拿到 "Oracle 11g 兼容版 init_oracle.sql"。
+13 张表需要 13 × 2 = 26 个对象。需要脚本可直接让 DBA 拿到 "Oracle 11g 兼容版 init_oracle.sql"。
 
 ### Q7. 启动后端报错 DPY-3010 / ORA-12541 / ORA-12514 / ORA-01017
 | 错 | 含义 | 处理 |
@@ -492,68 +467,83 @@ GO
 | DPY-3010 | TNS 解析错 | `.env` ORACLE_DSN 格式 |
 | ORA-12541 | 无监听 | Oracle listener 没开或 IP:Port 不通 |
 | ORA-12514 | SID/服务名错 | 向 DBA 核对真实 SERVICE_NAME |
-| ORA-01017 | 账号密码错 | Oracle 12c+ 默认大小写敏感密码，.env 不加引号 |
-| ORA-28000 | 账号被锁 | `ALTER USER CIM_WEB_USER ACCOUNT UNLOCK;` |
+| ORA-01017 | 账号密码错 | PANJOB 密码大小写敏感，.env 不加引号 |
+| ORA-28000 | 账号被锁 | 找 DBA `ALTER USER PANJOB ACCOUNT UNLOCK;` |
 
-### Q8. 想"回滚量产视图" → 重新用本地演示 EQUIPMENT 表
+### Q8. 想新建机台/修改机台主数据怎么办？
+**不能通过本项目！** 后端 `/api/equipment` 只提供 GET 路由，无 POST/PUT/DELETE。
+
+机台主数据的增删改请走原 MES/EAP 量产系统操作 `PANJOB.EQUIPMENTINFO`，本项目只读展示。
+
+### Q9. 想看哪些需求关联了某台机台
 ```sql
--- 在 CIM_WEB_USER 下执行 (生产环境不建议，仅供调试)
-DROP VIEW EQUIPMENT;
-GO
-DROP VIEW EQUIPMENT_TYPES;
-GO
-ALTER TABLE EQUIPMENT_LOCAL_BAK RENAME TO EQUIPMENT;
-GO
-ALTER TABLE EQUIPMENT_TYPES_LOCAL_BAK RENAME TO EQUIPMENT_TYPES;
+SELECT r.ID, r.TITLE, r.STATUS, r.EQUIPMENT_NAME
+  FROM REQUIREMENTS r
+ WHERE r.EQUIPMENT_NAME = '你的机台编号'
 GO
 ```
+（`EQUIPMENT_NAME` 外键引用 `EQUIPMENTINFO.EQUIPMENT`，确保只能关联真实存在的机台）
 
 ---
 
-## 8. 附录：初始化业务表一览 (共 15 张，全部新建，不会碰生产表)
+## 8. 附录：业务表一览
 
-> **再次强调**：下面 15 张表全部创建在 `CIM_WEB_USER` 用户下，对 `PANJOB` 方案无任何 DDL/DML，绝不碰量产 `EQUIPMENTINFO`。
+> **再次强调**：下面 13 张表 + 1 个视图全部创建在 `PANJOB` 用户下，对 `EQUIPMENTINFO` 量产真表**无任何 DDL/DML**，只读 SELECT。
 
-| # | 表名 | 中文说明 | init 行数 | 备注 |
-|---|------|---------|-----------|------|
+| # | 表/视图名 | 中文说明 | init 行数 | 备注 |
+|---|----------|---------|-----------|------|
 | 1 | PROJECTS | 项目表 | 5 | |
 | 2 | TASKS | 任务表 | 8 | |
-| 3 | EQUIPMENT_TYPES | 机台类型字典 | 8 | step2 RENAME 为备份，再建同名视图→量产类型 |
-| 4 | **EQUIPMENT** | 机台主表 | **80** (step1 演示) → **量产真实行数** (step2 视图替换后) | **唯一与量产对接的表**：step1 占位，step2 替换为视图指向 `PANJOB.EQUIPMENTINFO` |
-| 5 | CONFIGURATIONS | 机台配置项历史 | 0 | |
-| 6 | REQUIREMENTS | 需求表 | 5 | |
-| 7 | CHANGE_RECORDS | 需求变更记录 | 0 | |
-| 8 | REPORTS | 报表存储 | 0 | |
-| 9 | NOTES_DOCUMENTS | Notes 文档同步 | 0 | |
-| 10 | USERS | 系统用户 | 3 | administrator / eap.engineer / cim.user |
-| 11 | SYSTEM_SETTINGS | 系统设置 KV | 7 | step2 追加 git_source_* 2 条 → 共 9 条 |
-| 12 | WORK_CATEGORIES | 工作类别字典 | 8 | |
-| 13 | WORK_ITEMS | 工作项（待办） | 0 | |
-| 14 | DAILY_PLANS | 每日计划 | 0 | |
-| 15 | WORK_LOGS | 工作项变更日志 | 0 | |
+| 3 | **EQUIPMENT_TYPES** | 机台类型字典 | 类型去重数 | **视图**，从 EQUIPMENTINFO 去重 |
+| — | **EQUIPMENTINFO** | 机台主表 | **量产真实行数** | **生产真表，本项目不创建/不修改，ORM 直接映射只读** |
+| 4 | CONFIGURATIONS | 机台配置项历史 | 0 | 外键引用 EQUIPMENTINFO.EQUIPMENT |
+| 5 | REQUIREMENTS | 需求表 | 5 | 外键引用 EQUIPMENTINFO.EQUIPMENT |
+| 6 | CHANGE_RECORDS | 需求变更记录 | 0 | |
+| 7 | REPORTS | 报表存储 | 0 | |
+| 8 | NOTES_DOCUMENTS | Notes 文档同步 | 0 | |
+| 9 | USERS | 系统用户 | 3 | administrator / eap.engineer / cim.user |
+| 10 | SYSTEM_SETTINGS | 系统设置 KV | 9 | 含 git_source_* 2 条 |
+| 11 | WORK_CATEGORIES | 工作类别字典 | 8 | |
+| 12 | WORK_ITEMS | 工作项（待办） | 0 | |
+| 13 | DAILY_PLANS | 每日计划 | 0 | |
+| 14 | WORK_LOGS | 工作项变更日志 | 0 | |
 
 ### 文件清单
 
 | 路径 | 说明 |
 |------|------|
 | `DEPLOY_ORACLE_SOP.md` | 本 SOP |
-| `backend/data/init_oracle.sql` | **部署第 2.1 步**：建 15 张业务表 + 基础种子数据 |
-| `backend/data/prod_equipment_mapping.sql` | **部署第 2.2 步（量产必跑）**：替换 EQUIPMENT 为量产视图 + Git Source 映射配置 |
-| `backend/.env.oracle.example` | .env 模板（复制为 .env 使用） |
+| `backend/data/init_oracle.sql` | **单步部署 SQL**：建 13 张业务表 + 1 视图 + 业务种子数据 |
+| `backend/.env.oracle.example` | .env 模板（ORACLE_USER=PANJOB，复制为 .env 使用） |
 | `backend/config/settings.py` | 读取 .env (DATABASE_TYPE, ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN) |
 | `backend/database/session.py` | 根据 DATABASE_TYPE 动态生成 Oracle/SQLite URL (无需改) |
-| `backend/database/models.py` | Equipment 模型：ORM 8 列 + 量产 20 列 (视图列名严格对齐) |
-| `backend/schemas/equipment.py` | EquipmentResponse 18 真实列 + 前端 @computed_field 兼容别名 |
-| `backend/routes/equipment.py` | `/api/equipment` REST API (无需改, 视图透明访问量产) |
-| `backend/services/equipment_service.py` | ORM 查询 (无需改) |
+| `backend/database/models.py` | `Equipment.__tablename__="EQUIPMENTINFO"` 直接映射 18 列真表 |
+| `backend/schemas/equipment.py` | EquipmentResponse 18 真实列 + @computed_field 派生前端兼容字段 |
+| `backend/routes/equipment.py` | `/api/equipment` REST API (只读 GET，无写路由) |
+| `backend/services/equipment_service.py` | ORM 查询 (按 EQUIPMENT/EQUIPMENTTYPE/AREA/LINE 筛选) |
 | `src/types/index.ts` | 前端 Equipment 接口：扩充 source_code / line / chargeman / os 等量产字段 |
 | `src/pages/Equipment.tsx` | 机台管理 UI：14 列量产真实信息展示 + 🐙 Git Source 跳转按钮 |
 | `backend/requirements.txt` | 含 `oracledb==2.4.0` (thin 模式, 不用 Oracle Client) |
 
 ---
 
+## 部署流程速记（极简版）
+
+```
+1. ADS 用 PANJOB 登录 → 执行 init_oracle.sql (F5 整文件)
+   ↓ (单步完成，无需 DBA，无需第二步)
+2. backend/ 下复制 .env.oracle.example 为 .env
+   ↓
+3. 编辑 .env: DATABASE_TYPE=oracle, ORACLE_USER=PANJOB, ORACLE_PASSWORD=xxx, ORACLE_DSN=xxx
+   ↓
+4. 跑 test_oracle_equipment.py 自检
+   ↓
+5. 启动 uvicorn + 前端 → 访问 /equipment 验证机台列表 = 量产真实数据
+```
+
+---
+
 > 如有部署问题：
 > 1. 先查 **第 4.2 节** `test_oracle_equipment.py` 输出，99% 的问题在此处能定位
 > 2. Oracle/ADS 报错：定位到具体 GO 段的 SQL，看 FAQ 是否已有案例
-> 3. 视图字段校验：手动执行 `prod_equipment_mapping.sql` 第 5 段"校验 SQL"（单独选中执行看结果）
-> 4. 前端不展示量产列 → 清浏览器缓存 / DevTools 看 `GET /api/equipment` 返回值是否含 source_code 等字段（不含 → 后端版本不是 test1 分支）
+> 3. 前端不展示量产列 → 清浏览器缓存 / DevTools 看 `GET /api/equipment` 返回值是否含 source_code 等字段（不含 → 后端版本不是 test1 分支）

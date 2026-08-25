@@ -1,7 +1,4 @@
-from pydantic import (
-    BaseModel, Field, ConfigDict, computed_field,
-)
-from datetime import date, datetime
+from pydantic import BaseModel, Field, ConfigDict, computed_field
 from typing import Optional
 
 
@@ -13,46 +10,16 @@ class EquipmentTypeResponse(BaseModel):
     manufacturer: Optional[str] = None
 
 
-class EquipmentBase(BaseModel):
-    name: str
-    location: Optional[str] = None
-    driver_version: Optional[str] = None
-    installed_at: Optional[date] = None
-
-
-class EquipmentCreate(EquipmentBase):
-    type_id: int
-
-
-class EquipmentUpdate(BaseModel):
-    name: Optional[str] = None
-    type_id: Optional[int] = None
-    location: Optional[str] = None
-    status: Optional[str] = None
-    driver_version: Optional[str] = None
-
-
 class EquipmentResponse(BaseModel):
-    """机台列表/详情返回 (ORM 7 字段 + 量产 18 字段 + 前端兼容别名)
+    """直接映射 PANJOB.EQUIPMENTINFO 18 列 + @computed_field 派生前端兼容字段
 
-    - 量产真实字段: equipment, equipment_type ... source_code
-    - 前端兼容字段(@computed_field): 自动映射到原前端 Equipment.tsx 的 eq_* / ap_* / vendor / driver1_ip 等
+    量产表只读，无 id/type_id/name/location/status 等列。
+    status 由 OS 字段映射: Win% → online, NULL → offline, 其他 → maintenance
     """
     model_config = ConfigDict(from_attributes=True)
 
-    # ── ORM 核心字段 ──
-    id: int
-    type_id: int
-    name: str
-    location: Optional[str] = None
-    status: str
-    driver_version: Optional[str] = None
-    installed_at: Optional[date] = None
-    updated_at: Optional[datetime] = None
-    type: Optional[EquipmentTypeResponse] = None
-
-    # ── 量产真实字段 (PANJOB.EQUIPMENTINFO 18 列 + 2 预留列) ──
-    equipment: Optional[str] = None
+    # ── EQUIPMENTINFO 18 真实列 ──
+    equipment: str                                               # 主键: 机台编号
     equipment_type: Optional[str] = Field(default=None, validation_alias="EQUIPMENTTYPE")
     equipment_model: Optional[str] = Field(default=None, validation_alias="EQUIPMENTMODEL")
     line: Optional[str] = Field(default=None, validation_alias="LINE")
@@ -70,21 +37,23 @@ class EquipmentResponse(BaseModel):
     os: Optional[str] = Field(default=None, validation_alias="OS")
     srv_type: Optional[str] = Field(default=None, validation_alias="SRVTYPE")
     source_code: Optional[str] = Field(default=None, validation_alias="SOURCECODE")
-    extra_19: Optional[str] = Field(default=None, validation_alias="EXTRA19")
-    extra_20: Optional[str] = Field(default=None, validation_alias="EXTRA20")
 
-    # ── 前端页面兼容字段 (@computed_field 会自动序列化到 JSON) ──
+    # ── 前端兼容 @computed_field ──
+    @computed_field
+    @property
+    def id(self) -> str:
+        """前端用 equipment 作为 key/路由参数"""
+        return self.equipment
+
     @computed_field
     @property
     def eq_name(self) -> str:
-        return self.equipment or self.name
+        return self.equipment
 
     @computed_field
     @property
     def eq_type(self) -> str:
-        if self.equipment_type:
-            return self.equipment_type
-        return self.type.name if self.type else ""
+        return self.equipment_type or ""
 
     @computed_field
     @property
@@ -94,7 +63,7 @@ class EquipmentResponse(BaseModel):
     @computed_field
     @property
     def vendor(self) -> str:
-        return (self.type.manufacturer if self.type else "") or ""
+        return ""
 
     @computed_field
     @property
@@ -105,6 +74,11 @@ class EquipmentResponse(BaseModel):
     @property
     def driver_type(self) -> str:
         return self.srv_type or ""
+
+    @computed_field
+    @property
+    def driver_version(self) -> str:
+        return f"SRVTYPE:{self.srv_type or '?'} OS:{self.os or '?'}"
 
     @computed_field
     @property
@@ -143,20 +117,48 @@ class EquipmentResponse(BaseModel):
 
     @computed_field
     @property
-    def ap_id(self) -> int:
-        return self.id
+    def ap_id(self) -> str:
+        return self.equipment
 
     @computed_field
     @property
     def ap_name(self) -> str:
-        return self.cc_server or f"AP-{self.id:03d}"
+        return self.cc_server or self.equipment
+
+    @computed_field
+    @property
+    def status(self) -> str:
+        """OS 含 Win → online, NULL → offline, 其他 → maintenance"""
+        if not self.os:
+            return "offline"
+        return "online" if "WIN" in self.os.upper() else "maintenance"
+
+    @computed_field
+    @property
+    def location(self) -> str:
+        parts = []
+        if self.line:
+            parts.append(f"Line:{self.line}")
+        if self.area:
+            parts.append(f"Area:{self.area}")
+        return " / ".join(parts) if parts else ""
+
+    @computed_field
+    @property
+    def installed_at(self) -> Optional[str]:
+        return None
+
+    @computed_field
+    @property
+    def updated_at(self) -> Optional[str]:
+        return None
 
 
 class ConfigurationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
-    equipment_id: int
+    equipment_name: Optional[str] = None
     config_key: str
     config_value: str
     version: Optional[str] = None
-    applied_at: datetime
+    applied_at: str

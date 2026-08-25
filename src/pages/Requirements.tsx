@@ -162,10 +162,10 @@ export default function Requirements() {
     return labels[status] || status;
   };
 
-  const getEquipmentName = (equipmentId?: number) => {
-    if (!equipmentId) return '未关联';
-    const eq = equipment.find((e) => e.id === equipmentId);
-    return eq ? eq.eq_name : '未知机台';
+  const getEquipmentName = (equipmentName?: string) => {
+    if (!equipmentName) return '未关联';
+    const eq = equipment.find((e) => (e.equipment ?? String(e.id)) === equipmentName);
+    return eq ? (eq.eq_name || eq.equipment || '未知机台') : equipmentName;
   };
 
   const statusOrder = { pending: 0, in_progress: 1, testing: 2, completed: 3, rejected: 4 };
@@ -290,10 +290,10 @@ export default function Requirements() {
                             </span>
                             <span className="text-xs text-gray-400">{new Date(req.created_at).toLocaleDateString()}</span>
                           </div>
-                          {req.equipment_id && (
+                          {req.equipment_name && (
                             <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
                               <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
-                              {getEquipmentName(req.equipment_id)}
+                              {getEquipmentName(req.equipment_name)}
                             </p>
                           )}
                         </div>
@@ -361,7 +361,7 @@ export default function Requirements() {
                             <span className={`px-1.5 py-0.5 rounded text-xs ${getStatusColor(req.status)}`}>
                               {getStatusLabel(req.status)}
                             </span>
-                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_id)}</span>
+                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_name)}</span>
                           </div>
                         </div>
                       ))}
@@ -402,7 +402,7 @@ export default function Requirements() {
                             <span className={`px-1.5 py-0.5 rounded text-xs ${getStatusColor(req.status)}`}>
                               {getStatusLabel(req.status)}
                             </span>
-                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_id)}</span>
+                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_name)}</span>
                           </div>
                         </div>
                       ))}
@@ -443,7 +443,7 @@ export default function Requirements() {
                             <span className={`px-1.5 py-0.5 rounded text-xs ${getStatusColor(req.status)}`}>
                               {getStatusLabel(req.status)}
                             </span>
-                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_id)}</span>
+                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_name)}</span>
                           </div>
                         </div>
                       ))}
@@ -484,7 +484,7 @@ export default function Requirements() {
                             <span className={`px-1.5 py-0.5 rounded text-xs ${getStatusColor(req.status)}`}>
                               {getStatusLabel(req.status)}
                             </span>
-                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_id)}</span>
+                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_name)}</span>
                           </div>
                         </div>
                       ))}
@@ -570,14 +570,17 @@ export default function Requirements() {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">关联机台</label>
             <select
-              value={formData.equipment_id}
-              onChange={(e) => setFormData({ ...formData, equipment_id: parseInt(e.target.value) || undefined })}
+              value={formData.equipment_name ?? ''}
+              onChange={(e) => setFormData({ ...formData, equipment_name: e.target.value || undefined })}
               className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
             >
               <option value="">不关联机台</option>
-              {equipment.map((item) => (
-                <option key={item.id} value={item.id}>{item.eq_name} ({item.ap_name})</option>
-              ))}
+              {equipment.map((item) => {
+                const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
+                return (
+                  <option key={eqKey} value={eqKey}>{item.eq_name} ({item.ap_name})</option>
+                );
+              })}
             </select>
           </div>
           <div>

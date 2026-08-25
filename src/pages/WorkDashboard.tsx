@@ -16,8 +16,21 @@ import {
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import { workItemsAPI } from '@/services/api';
-import { workStatusColors as statusColors, workStatusLabels as statusLabels } from '@/utils/constants';
 import type { WorkStats, WorkItem, DailyPlan } from '@/types';
+
+const statusColors: Record<string, string> = {
+  pending: 'bg-gray-100 text-gray-700',
+  in_progress: 'bg-blue-100 text-blue-700',
+  completed: 'bg-green-100 text-green-700',
+  blocked: 'bg-red-100 text-red-700',
+};
+
+const statusLabels: Record<string, string> = {
+  pending: '待处理',
+  in_progress: '进行中',
+  completed: '已完成',
+  blocked: '受阻',
+};
 
 export default function WorkDashboard() {
   const [stats, setStats] = useState<WorkStats | null>(null);

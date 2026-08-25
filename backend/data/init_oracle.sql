@@ -5,21 +5,27 @@
 -- 执行方式: 打开本文件 -> 连接目标Oracle实例 -> 整文件"执行"
 --
 -- ╔════════════════════════════════════════════════════════════════════════╗
--- ║  【量产部署 - 必读】                                                   ║
--- ║  本脚本用于在 CIM_WEB_USER 下创建 13 张业务表 (项目/任务/需求/用户/   ║
--- ║  工作管理等) 以及 2 张演示用表 (EQUIPMENT/EQUIPMENT_TYPES)。           ║
+-- ║  【量产部署方案 - PANJOB 账号直连】                                    ║
 -- ║                                                                        ║
--- ║  · 真实机台主数据来自 PANJOB.EQUIPMENTINFO (已存在于生产库)，          ║
--- ║    本脚本不会、也不允许新建或覆盖该表！                                ║
--- ║  · 量产环境下，本脚本执行完毕后，必须再执行第二步：                    ║
--- ║    prod_equipment_mapping.sql  (将演示机台表替换为指向                ║
--- ║    PANJOB.EQUIPMENTINFO 的只读视图)                                   ║
+-- ║  · 登录账号: PANJOB (与 EQUIPMENTINFO 同账号，所有新建表落在 PANJOB     ║
+-- ║    默认表空间 = EQUIPMENTINFO 所在表空间)                              ║
+-- ║  · 机台主表 EQUIPMENTINFO 已存在且为生产数据，本脚本【绝不创建/修改】!  ║
+-- ║    后端 ORM 直接映射此真表，前端只读展示。                             ║
+-- ║  · 本脚本只创建 13 张业务表 + 1 个类型视图 (EQUIPMENT_TYPES)：         ║
+-- ║      PROJECTS / TASKS / EQUIPMENT_TYPES(视图) / CONFIGURATIONS /       ║
+-- ║      REQUIREMENTS / CHANGE_RECORDS / REPORTS / NOTES_DOCUMENTS /       ║
+-- ║      USERS / SYSTEM_SETTINGS / WORK_CATEGORIES / WORK_ITEMS /         ║
+-- ║      DAILY_PLANS / WORK_LOGS                                           ║
+-- ║  · 外键 CONFIGURATIONS.EQUIPMENT_NAME / REQUIREMENTS.EQUIPMENT_NAME    ║
+-- ║    引用 EQUIPMENTINFO.EQUIPMENT (VARCHAR2 主键)                        ║
+-- ║                                                                        ║
+-- ║  · 单步部署：本脚本执行完毕即可启动后端，无需第二步!                   ║
 -- ║  · 禁止在已有业务数据的环境下重复执行本脚本！DROP 段会清空所有表。     ║
 -- ╚════════════════════════════════════════════════════════════════════════╝
 --
 -- 注意事项:
---   1. 执行前请确认已创建业务专用 TABLESPACE，或使用默认 USERS 表空间
---   2. 如需指定表空间，请替换所有 "TABLESPACE USERS" 为目标表空间名
+--   1. 执行前请确认已用 PANJOB 账号登录 (脚本段 0 会自检)
+--   2. 所有 CREATE TABLE 不指定 TABLESPACE，自动落在 PANJOB 默认表空间
 --   3. 若为 Oracle 11g，请将所有 "GENERATED AS IDENTITY" 改为 SEQUENCE + TRIGGER 方案
 -- ============================================================================
 
@@ -33,21 +39,39 @@ SELECT USER         AS CUR_USER,
   FROM DUAL
 GO
 PRINT '===================================================='
-PRINT ' 若上面 CUR_USER 不是 CIM_WEB_USER，请中止并切换连接！'
+PRINT ' 若上面 CUR_USER 不是 PANJOB，请中止并切换连接！     '
+PRINT '===================================================='
+GO
+
+-- 确认 EQUIPMENTINFO 表存在于当前用户下
+SELECT COUNT(*) AS EQUIPMENTINFO_ROWS FROM EQUIPMENTINFO
+GO
+PRINT '===================================================='
+PRINT ' 若上面 EQUIPMENTINFO_ROWS = 0 或报 ORA-00942,         '
+PRINT ' 请中止: 当前账号无 EQUIPMENTINFO 表，无法部署!       '
 PRINT '===================================================='
 GO
 
 -- ----------------------------------------------------------------------------
--- 1. DROP TABLES (级联删除，按外键依赖顺序 — 仅首次部署安全执行)
+-- 1. DROP TABLES / VIEWS (级联删除，按外键依赖顺序 — 仅首次部署安全执行)
 -- ----------------------------------------------------------------------------
--- 使用 PL/SQL 动态 DROP：表不存在时不报错，避免首次执行被 ORA-00942 中断
+-- 使用 PL/SQL 动态 DROP：对象不存在时不报错，避免首次执行被 ORA-00942 中断
+-- ⚠️ 严禁 DROP EQUIPMENTINFO！以下列表中绝无 'EQUIPMENTINFO'
 DECLARE
   PROCEDURE drop_if_exists(p_name IN VARCHAR2) IS
   BEGIN
     EXECUTE IMMEDIATE 'DROP TABLE ' || p_name || ' CASCADE CONSTRAINTS PURGE';
-    DBMS_OUTPUT.PUT_LINE('DROP OK    : ' || p_name);
+    DBMS_OUTPUT.PUT_LINE('DROP TABLE OK : ' || p_name);
   EXCEPTION WHEN OTHERS THEN
     IF SQLCODE = -942 THEN NULL;  -- 表不存在，忽略
+    ELSE RAISE; END IF;
+  END;
+  PROCEDURE drop_view_if_exists(p_name IN VARCHAR2) IS
+  BEGIN
+    EXECUTE IMMEDIATE 'DROP VIEW ' || p_name;
+    DBMS_OUTPUT.PUT_LINE('DROP VIEW  OK : ' || p_name);
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLCODE = -942 THEN NULL;
     ELSE RAISE; END IF;
   END;
 BEGIN
@@ -62,8 +86,7 @@ BEGIN
   drop_if_exists('CHANGE_RECORDS');
   drop_if_exists('CONFIGURATIONS');
   drop_if_exists('REQUIREMENTS');
-  drop_if_exists('EQUIPMENT');          -- 演示机台表(下一步会替换为视图)
-  drop_if_exists('EQUIPMENT_TYPES');    -- 演示类型表(下一步会替换为视图)
+  drop_view_if_exists('EQUIPMENT_TYPES');   -- 视图，先于 EQUIPMENT_TYPES 表
   drop_if_exists('TASKS');
   drop_if_exists('PROJECTS');
   COMMIT;
@@ -71,9 +94,8 @@ END;
 GO
 
 -- ----------------------------------------------------------------------------
--- 2. CREATE TABLES — 15 张业务表全部创建在 CIM_WEB_USER 下
---    其中 EQUIPMENT / EQUIPMENT_TYPES 在量产环境中只是"占位壳"，
---    下一步 prod_equipment_mapping.sql 会 RENAME 为备份并替换为量产视图。
+-- 2. CREATE TABLES — 13 张业务表全部创建在 PANJOB 下 (与 EQUIPMENTINFO 同表空间)
+--    不指定 TABLESPACE，使用 PANJOB 默认表空间。
 -- ----------------------------------------------------------------------------
 
 -- 2.1 PROJECTS - 项目表
@@ -88,7 +110,7 @@ CREATE TABLE PROJECTS (
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
     UPDATED_AT      TIMESTAMP,
     CONSTRAINT CHK_PROJECTS_STATUS CHECK (STATUS IN ('active','completed','paused','cancelled'))
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  PROJECTS              IS '项目管理表'
 GO
@@ -110,7 +132,7 @@ COMMENT ON COLUMN PROJECTS.CREATED_AT   IS '创建时间'
 GO
 COMMENT ON COLUMN PROJECTS.UPDATED_AT   IS '更新时间'
 GO
-CREATE INDEX IDX_PROJECTS_STATUS ON PROJECTS(STATUS) TABLESPACE USERS
+CREATE INDEX IDX_PROJECTS_STATUS ON PROJECTS(STATUS)
 GO
 
 -- 2.2 TASKS - 任务表
@@ -127,7 +149,7 @@ CREATE TABLE TASKS (
     CONSTRAINT CHK_TASKS_STATUS   CHECK (STATUS   IN ('pending','in_progress','completed','blocked')),
     CONSTRAINT CHK_TASKS_PRIORITY CHECK (PRIORITY IN ('low','medium','high','critical')),
     CONSTRAINT FK_TASKS_PROJECT   FOREIGN KEY (PROJECT_ID) REFERENCES PROJECTS(ID) ON DELETE SET NULL
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  TASKS              IS '项目任务表'
 GO
@@ -137,112 +159,54 @@ COMMENT ON COLUMN TASKS.STATUS       IS '任务状态: pending待处理/in_progr
 GO
 COMMENT ON COLUMN TASKS.PRIORITY     IS '任务优先级: low低/medium中/high高/critical紧急'
 GO
-CREATE INDEX IDX_TASKS_PROJECT_ID ON TASKS(PROJECT_ID) TABLESPACE USERS
+CREATE INDEX IDX_TASKS_PROJECT_ID ON TASKS(PROJECT_ID)
 GO
-CREATE INDEX IDX_TASKS_STATUS     ON TASKS(STATUS)     TABLESPACE USERS
-GO
-
--- 2.3 EQUIPMENT_TYPES - 机台类型表 (占位壳表 — 量产部署第二步替换为视图)
-CREATE TABLE EQUIPMENT_TYPES (
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
-    NAME            VARCHAR2(100 CHAR) NOT NULL,
-    DESCRIPTION     CLOB,
-    MANUFACTURER    VARCHAR2(100 CHAR)
-) TABLESPACE USERS
-GO
-COMMENT ON TABLE  EQUIPMENT_TYPES              IS '机台(设备)类型表 — 量产部署后将替换为PANJOB.EQUIPMENTINFO类型去重视图'
-GO
-COMMENT ON COLUMN EQUIPMENT_TYPES.MANUFACTURER IS '设备厂商，如ASML/TEL/LAM'
+CREATE INDEX IDX_TASKS_STATUS     ON TASKS(STATUS)
 GO
 
--- 2.4 EQUIPMENT - 机台(设备)表 (占位壳表 — 量产部署第二步替换为视图)
---     列结构必须与 models.py + prod_equipment_mapping.sql 视图完全一致:
---       · 前 8 列: ORM 核心列
---       · 后 20 列: PANJOB.EQUIPMENTINFO 量产列 (大写列名严格对齐)
-CREATE TABLE EQUIPMENT (
-    -- ORM 核心 8 列
-    ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
-    TYPE_ID         NUMBER(10),
-    NAME            VARCHAR2(100 CHAR) NOT NULL,
-    LOCATION        VARCHAR2(200 CHAR),
-    STATUS          VARCHAR2(20 CHAR) DEFAULT 'online',
-    DRIVER_VERSION  VARCHAR2(200 CHAR),
-    INSTALLED_AT    DATE,
-    UPDATED_AT      TIMESTAMP,
-    -- 量产真实 18 列 (列名大写对齐 PANJOB.EQUIPMENTINFO + models.py Column("XXX"))
-    EQUIPMENT       VARCHAR2(32 CHAR),
-    EQUIPMENTTYPE   VARCHAR2(32 CHAR),
-    EQUIPMENTMODEL  VARCHAR2(32 CHAR),
-    LINE            VARCHAR2(32 CHAR),
-    CCSERVER        VARCHAR2(32 CHAR),
-    AREA            VARCHAR2(32 CHAR),
-    MOXA            VARCHAR2(32 CHAR),
-    NPORT           VARCHAR2(32 CHAR),
-    NPORTIP         VARCHAR2(32 CHAR),
-    NPORTCOM        VARCHAR2(32 CHAR),
-    CHARGEMAN       VARCHAR2(32 CHAR),
-    SMIF1NPORTIP    VARCHAR2(32 CHAR),
-    SMIF2NPORTIP    VARCHAR2(32 CHAR),
-    SMIF3NPORTIP    VARCHAR2(32 CHAR),
-    SMIF4NPORTIP    VARCHAR2(32 CHAR),
-    OS              VARCHAR2(32 CHAR),
-    SRVTYPE         VARCHAR2(32 CHAR),
-    SOURCECODE      VARCHAR2(32 CHAR),
-    -- 预留 2 列
-    EXTRA19         VARCHAR2(32 CHAR),
-    EXTRA20         VARCHAR2(32 CHAR),
-    CONSTRAINT CHK_EQUIPMENT_STATUS CHECK (STATUS IN ('online','offline','maintenance','decommissioned')),
-    CONSTRAINT FK_EQUIPMENT_TYPE    FOREIGN KEY (TYPE_ID) REFERENCES EQUIPMENT_TYPES(ID) ON DELETE SET NULL
-) TABLESPACE USERS
+-- 2.3 EQUIPMENT_TYPES - 机台类型视图 (从 EQUIPMENTINFO 去重 EQUIPMENTTYPE 列)
+--     后端 EquipmentType ORM 读取此视图，前端筛选下拉框自动同步量产真实类型
+CREATE OR REPLACE VIEW EQUIPMENT_TYPES AS
+SELECT
+    ROWNUM                                    AS ID,
+    EQUIPMENTTYPE                             AS NAME,
+    '量产机台类型: ' || EQUIPMENTTYPE          AS DESCRIPTION,
+    NULL                                      AS MANUFACTURER
+  FROM (
+    SELECT DISTINCT EQUIPMENTTYPE
+      FROM EQUIPMENTINFO
+     WHERE EQUIPMENTTYPE IS NOT NULL
+     ORDER BY EQUIPMENTTYPE
+  )
 GO
-COMMENT ON TABLE  EQUIPMENT              IS '机台(设备)主表 — 量产部署后将替换为读取PANJOB.EQUIPMENTINFO的只读视图'
-GO
-COMMENT ON COLUMN EQUIPMENT.STATUS       IS '机台状态: online在线/offline离线/maintenance维护中/decommissioned已退役'
-GO
-COMMENT ON COLUMN EQUIPMENT.EQUIPMENT    IS '量产字段: 机台编号 (主标识)'
-GO
-COMMENT ON COLUMN EQUIPMENT.EQUIPMENTTYPE IS '量产字段: 机台类型 (例: PECVD/CPC)'
-GO
-COMMENT ON COLUMN EQUIPMENT.EQUIPMENTMODEL IS '量产字段: 机台型号 (例: ASM Eagle-10)'
-GO
-COMMENT ON COLUMN EQUIPMENT.CCSERVER     IS '量产字段: CC服务器编号'
-GO
-COMMENT ON COLUMN EQUIPMENT.SOURCECODE   IS '量产字段: 源码分类码 → Git URL 映射键'
-GO
-CREATE INDEX IDX_EQUIPMENT_TYPE_ID ON EQUIPMENT(TYPE_ID) TABLESPACE USERS
-GO
-CREATE INDEX IDX_EQUIPMENT_STATUS  ON EQUIPMENT(STATUS)  TABLESPACE USERS
-GO
-CREATE INDEX IDX_EQUIPMENT_NAME    ON EQUIPMENT(NAME)    TABLESPACE USERS
-GO
-CREATE INDEX IDX_EQUIPMENT_EQCODE  ON EQUIPMENT(EQUIPMENT) TABLESPACE USERS
-GO
-CREATE INDEX IDX_EQUIPMENT_SRC     ON EQUIPMENT(SOURCECODE) TABLESPACE USERS
+COMMENT ON TABLE EQUIPMENT_TYPES IS '机台类型视图 (从 EQUIPMENTINFO 去重 EQUIPMENTTYPE)'
 GO
 
--- 2.5 CONFIGURATIONS - 机台配置项表
+-- 2.4 CONFIGURATIONS - 机台配置项表 (外键引用 EQUIPMENTINFO.EQUIPMENT)
 CREATE TABLE CONFIGURATIONS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
-    EQUIPMENT_ID    NUMBER(10),
+    EQUIPMENT_NAME  VARCHAR2(32 CHAR),
     CONFIG_KEY      VARCHAR2(100 CHAR) NOT NULL,
     CONFIG_VALUE    CLOB,
     VERSION         VARCHAR2(20 CHAR),
     APPLIED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
-    CONSTRAINT FK_CONFIG_EQUIPMENT FOREIGN KEY (EQUIPMENT_ID) REFERENCES EQUIPMENT(ID) ON DELETE CASCADE
-) TABLESPACE USERS
+    CONSTRAINT FK_CONFIG_EQUIPMENT FOREIGN KEY (EQUIPMENT_NAME) REFERENCES EQUIPMENTINFO(EQUIPMENT) ON DELETE CASCADE
+)
 GO
-COMMENT ON TABLE  CONFIGURATIONS            IS '机台配置项历史表'
+COMMENT ON TABLE  CONFIGURATIONS             IS '机台配置项历史表 (外键指向量产表 EQUIPMENTINFO)'
 GO
-COMMENT ON COLUMN CONFIGURATIONS.CONFIG_KEY IS '配置项键名'
+COMMENT ON COLUMN CONFIGURATIONS.EQUIPMENT_NAME IS '机台编号 (= EQUIPMENTINFO.EQUIPMENT)'
 GO
-COMMENT ON COLUMN CONFIGURATIONS.VERSION    IS '配置版本号'
+COMMENT ON COLUMN CONFIGURATIONS.CONFIG_KEY  IS '配置项键名'
 GO
-CREATE INDEX IDX_CONFIG_EQUIPMENT_ID ON CONFIGURATIONS(EQUIPMENT_ID) TABLESPACE USERS
+COMMENT ON COLUMN CONFIGURATIONS.VERSION     IS '配置版本号'
 GO
-CREATE INDEX IDX_CONFIG_KEY          ON CONFIGURATIONS(CONFIG_KEY)   TABLESPACE USERS
+CREATE INDEX IDX_CONFIG_EQUIPMENT_NAME ON CONFIGURATIONS(EQUIPMENT_NAME)
+GO
+CREATE INDEX IDX_CONFIG_KEY            ON CONFIGURATIONS(CONFIG_KEY)
 GO
 
--- 2.6 REQUIREMENTS - 需求表
+-- 2.5 REQUIREMENTS - 需求表 (外键引用 EQUIPMENTINFO.EQUIPMENT)
 CREATE TABLE REQUIREMENTS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     TITLE           VARCHAR2(200 CHAR) NOT NULL,
@@ -250,31 +214,33 @@ CREATE TABLE REQUIREMENTS (
     PRIORITY        VARCHAR2(20 CHAR) DEFAULT 'medium',
     STATUS          VARCHAR2(20 CHAR) DEFAULT 'pending',
     PROJECT_ID      NUMBER(10),
-    EQUIPMENT_ID    NUMBER(10),
+    EQUIPMENT_NAME  VARCHAR2(32 CHAR),
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
     UPDATED_AT      TIMESTAMP,
     CONSTRAINT CHK_REQ_PRIORITY CHECK (PRIORITY IN ('low','medium','high','critical')),
     CONSTRAINT CHK_REQ_STATUS   CHECK (STATUS   IN ('pending','in_progress','testing','completed','rejected')),
-    CONSTRAINT FK_REQ_PROJECT   FOREIGN KEY (PROJECT_ID)   REFERENCES PROJECTS(ID)  ON DELETE SET NULL,
-    CONSTRAINT FK_REQ_EQUIPMENT FOREIGN KEY (EQUIPMENT_ID) REFERENCES EQUIPMENT(ID) ON DELETE SET NULL
-) TABLESPACE USERS
+    CONSTRAINT FK_REQ_PROJECT   FOREIGN KEY (PROJECT_ID)     REFERENCES PROJECTS(ID)        ON DELETE SET NULL,
+    CONSTRAINT FK_REQ_EQUIPMENT FOREIGN KEY (EQUIPMENT_NAME) REFERENCES EQUIPMENTINFO(EQUIPMENT) ON DELETE SET NULL
+)
 GO
-COMMENT ON TABLE  REQUIREMENTS          IS '需求管理表'
+COMMENT ON TABLE  REQUIREMENTS               IS '需求管理表'
 GO
-COMMENT ON COLUMN REQUIREMENTS.PRIORITY IS '需求优先级: low低/medium中/high高/critical紧急'
+COMMENT ON COLUMN REQUIREMENTS.PRIORITY      IS '需求优先级: low低/medium中/high高/critical紧急'
 GO
-COMMENT ON COLUMN REQUIREMENTS.STATUS   IS '需求状态: pending待处理/in_progress进行中/testing测试中/completed已完成/rejected已拒绝'
+COMMENT ON COLUMN REQUIREMENTS.STATUS        IS '需求状态: pending待处理/in_progress进行中/testing测试中/completed已完成/rejected已拒绝'
 GO
-CREATE INDEX IDX_REQ_PROJECT_ID   ON REQUIREMENTS(PROJECT_ID)   TABLESPACE USERS
+COMMENT ON COLUMN REQUIREMENTS.EQUIPMENT_NAME IS '机台编号 (= EQUIPMENTINFO.EQUIPMENT)'
 GO
-CREATE INDEX IDX_REQ_EQUIPMENT_ID ON REQUIREMENTS(EQUIPMENT_ID) TABLESPACE USERS
+CREATE INDEX IDX_REQ_PROJECT_ID     ON REQUIREMENTS(PROJECT_ID)
 GO
-CREATE INDEX IDX_REQ_STATUS       ON REQUIREMENTS(STATUS)       TABLESPACE USERS
+CREATE INDEX IDX_REQ_EQUIPMENT_NAME ON REQUIREMENTS(EQUIPMENT_NAME)
 GO
-CREATE INDEX IDX_REQ_PRIORITY     ON REQUIREMENTS(PRIORITY)     TABLESPACE USERS
+CREATE INDEX IDX_REQ_STATUS         ON REQUIREMENTS(STATUS)
+GO
+CREATE INDEX IDX_REQ_PRIORITY        ON REQUIREMENTS(PRIORITY)
 GO
 
--- 2.7 CHANGE_RECORDS - 需求变更记录表
+-- 2.6 CHANGE_RECORDS - 需求变更记录表
 CREATE TABLE CHANGE_RECORDS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     REQUIREMENT_ID  NUMBER(10)    NOT NULL,
@@ -283,7 +249,7 @@ CREATE TABLE CHANGE_RECORDS (
     FILE_PATH       VARCHAR2(500 CHAR),
     APPLIED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
     CONSTRAINT FK_CHANGE_REQ FOREIGN KEY (REQUIREMENT_ID) REFERENCES REQUIREMENTS(ID) ON DELETE CASCADE
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  CHANGE_RECORDS              IS '需求变更记录/修改历史'
 GO
@@ -291,10 +257,10 @@ COMMENT ON COLUMN CHANGE_RECORDS.CHANGE_TYPE  IS '变更类型，如 modify/dele
 GO
 COMMENT ON COLUMN CHANGE_RECORDS.FILE_PATH    IS '关联代码/配置文件路径'
 GO
-CREATE INDEX IDX_CHANGE_REQ_ID ON CHANGE_RECORDS(REQUIREMENT_ID) TABLESPACE USERS
+CREATE INDEX IDX_CHANGE_REQ_ID ON CHANGE_RECORDS(REQUIREMENT_ID)
 GO
 
--- 2.8 REPORTS - 报表表
+-- 2.7 REPORTS - 报表表
 CREATE TABLE REPORTS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     TITLE           VARCHAR2(200 CHAR) NOT NULL,
@@ -302,16 +268,16 @@ CREATE TABLE REPORTS (
     CONTENT         CLOB,
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
     UPDATED_AT      TIMESTAMP
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  REPORTS             IS '报表/周报/月报存储'
 GO
 COMMENT ON COLUMN REPORTS.REPORT_DATE IS '报表所属日期'
 GO
-CREATE INDEX IDX_REPORTS_DATE ON REPORTS(REPORT_DATE) TABLESPACE USERS
+CREATE INDEX IDX_REPORTS_DATE ON REPORTS(REPORT_DATE)
 GO
 
--- 2.9 NOTES_DOCUMENTS - HCL Notes 文档同步表
+-- 2.8 NOTES_DOCUMENTS - HCL Notes 文档同步表
 CREATE TABLE NOTES_DOCUMENTS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     NOTES_ID        VARCHAR2(100 CHAR),
@@ -322,7 +288,7 @@ CREATE TABLE NOTES_DOCUMENTS (
     SYNC_AT         TIMESTAMP,
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
     CONSTRAINT FK_NOTES_PROJECT FOREIGN KEY (PROJECT_ID) REFERENCES PROJECTS(ID) ON DELETE SET NULL
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  NOTES_DOCUMENTS          IS 'HCL Notes 文档同步缓存表'
 GO
@@ -330,10 +296,10 @@ COMMENT ON COLUMN NOTES_DOCUMENTS.NOTES_ID IS 'Notes 文档唯一UNID'
 GO
 COMMENT ON COLUMN NOTES_DOCUMENTS.SYNC_AT  IS '最后一次同步时间'
 GO
-CREATE INDEX IDX_NOTES_PROJECT_ID ON NOTES_DOCUMENTS(PROJECT_ID) TABLESPACE USERS
+CREATE INDEX IDX_NOTES_PROJECT_ID ON NOTES_DOCUMENTS(PROJECT_ID)
 GO
 
--- 2.10 USERS - 用户表
+-- 2.9 USERS - 用户表
 CREATE TABLE USERS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     USERNAME        VARCHAR2(100 CHAR) NOT NULL,
@@ -346,7 +312,7 @@ CREATE TABLE USERS (
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
     UPDATED_AT      TIMESTAMP,
     CONSTRAINT UK_USERS_USERNAME UNIQUE (USERNAME)
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  USERS              IS '系统用户表'
 GO
@@ -358,10 +324,10 @@ COMMENT ON COLUMN USERS.ROLE         IS '角色: admin/engineer/user'
 GO
 COMMENT ON COLUMN USERS.STATUS       IS '账号状态: active启用/inactive禁用'
 GO
-CREATE INDEX IDX_USERS_USERNAME ON USERS(USERNAME) TABLESPACE USERS
+CREATE INDEX IDX_USERS_USERNAME ON USERS(USERNAME)
 GO
 
--- 2.11 SYSTEM_SETTINGS - 系统设置表
+-- 2.10 SYSTEM_SETTINGS - 系统设置表
 CREATE TABLE SYSTEM_SETTINGS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     KEY             VARCHAR2(100 CHAR) NOT NULL,
@@ -370,7 +336,7 @@ CREATE TABLE SYSTEM_SETTINGS (
     CATEGORY        VARCHAR2(50 CHAR) DEFAULT 'general',
     UPDATED_AT      TIMESTAMP,
     CONSTRAINT UK_SYS_SETTINGS_KEY UNIQUE (KEY)
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  SYSTEM_SETTINGS          IS '系统参数/配置存储表'
 GO
@@ -378,12 +344,12 @@ COMMENT ON COLUMN SYSTEM_SETTINGS.KEY      IS '配置键名(唯一)'
 GO
 COMMENT ON COLUMN SYSTEM_SETTINGS.CATEGORY IS '配置分类: general/ai/notes/equipment'
 GO
-CREATE INDEX IDX_SYS_SETTINGS_KEY      ON SYSTEM_SETTINGS(KEY)      TABLESPACE USERS
+CREATE INDEX IDX_SYS_SETTINGS_KEY      ON SYSTEM_SETTINGS(KEY)
 GO
-CREATE INDEX IDX_SYS_SETTINGS_CATEGORY ON SYSTEM_SETTINGS(CATEGORY) TABLESPACE USERS
+CREATE INDEX IDX_SYS_SETTINGS_CATEGORY ON SYSTEM_SETTINGS(CATEGORY)
 GO
 
--- 2.12 WORK_CATEGORIES - 工作类别表
+-- 2.11 WORK_CATEGORIES - 工作类别表
 CREATE TABLE WORK_CATEGORIES (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     NAME            VARCHAR2(100 CHAR) NOT NULL,
@@ -394,7 +360,7 @@ CREATE TABLE WORK_CATEGORIES (
     SORT_ORDER      NUMBER(10)    DEFAULT 0,
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
     CONSTRAINT UK_WORK_CATEGORIES_CODE UNIQUE (CODE)
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  WORK_CATEGORIES            IS '工作管理-工作类别字典'
 GO
@@ -404,10 +370,10 @@ COMMENT ON COLUMN WORK_CATEGORIES.SORT_ORDER IS '显示排序序号'
 GO
 COMMENT ON COLUMN WORK_CATEGORIES.COLOR      IS '前端标签颜色(HEX)'
 GO
-CREATE INDEX IDX_WORK_CATEGORIES_CODE ON WORK_CATEGORIES(CODE) TABLESPACE USERS
+CREATE INDEX IDX_WORK_CATEGORIES_CODE ON WORK_CATEGORIES(CODE)
 GO
 
--- 2.13 WORK_ITEMS - 工作项表
+-- 2.12 WORK_ITEMS - 工作项表
 CREATE TABLE WORK_ITEMS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     CATEGORY_ID     NUMBER(10),
@@ -428,7 +394,7 @@ CREATE TABLE WORK_ITEMS (
     CONSTRAINT CHK_WORKITEM_IMPORTANCE CHECK (IMPORTANCE IN ('na','low','medium','high')),
     CONSTRAINT FK_WORKITEM_CATEGORY    FOREIGN KEY (CATEGORY_ID) REFERENCES WORK_CATEGORIES(ID) ON DELETE SET NULL,
     CONSTRAINT FK_WORKITEM_PROJECT     FOREIGN KEY (PROJECT_ID)  REFERENCES PROJECTS(ID)        ON DELETE SET NULL
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  WORK_ITEMS                  IS '工作管理-工作项(待办事项)'
 GO
@@ -442,16 +408,16 @@ COMMENT ON COLUMN WORK_ITEMS.PRIORITY_SCORE   IS 'AI计算的优先级分数'
 GO
 COMMENT ON COLUMN WORK_ITEMS.SOURCE_TYPE      IS '来源类型: manual手动/table_import导入/notes同步'
 GO
-CREATE INDEX IDX_WORKITEM_CATEGORY_ID ON WORK_ITEMS(CATEGORY_ID)    TABLESPACE USERS
+CREATE INDEX IDX_WORKITEM_CATEGORY_ID ON WORK_ITEMS(CATEGORY_ID)
 GO
-CREATE INDEX IDX_WORKITEM_PROJECT_ID  ON WORK_ITEMS(PROJECT_ID)     TABLESPACE USERS
+CREATE INDEX IDX_WORKITEM_PROJECT_ID  ON WORK_ITEMS(PROJECT_ID)
 GO
-CREATE INDEX IDX_WORKITEM_STATUS      ON WORK_ITEMS(STATUS)         TABLESPACE USERS
+CREATE INDEX IDX_WORKITEM_STATUS      ON WORK_ITEMS(STATUS)
 GO
-CREATE INDEX IDX_WORKITEM_PRIORITY    ON WORK_ITEMS(PRIORITY_SCORE) TABLESPACE USERS
+CREATE INDEX IDX_WORKITEM_PRIORITY    ON WORK_ITEMS(PRIORITY_SCORE)
 GO
 
--- 2.14 DAILY_PLANS - 每日计划表
+-- 2.13 DAILY_PLANS - 每日计划表
 CREATE TABLE DAILY_PLANS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     PLAN_DATE       DATE            NOT NULL,
@@ -462,7 +428,7 @@ CREATE TABLE DAILY_PLANS (
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
     UPDATED_AT      TIMESTAMP,
     CONSTRAINT FK_DAILYPLAN_USER FOREIGN KEY (USER_ID) REFERENCES USERS(ID) ON DELETE SET NULL
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  DAILY_PLANS              IS '工作管理-每日工作计划'
 GO
@@ -470,10 +436,10 @@ COMMENT ON COLUMN DAILY_PLANS.PLAN_DATE    IS '计划日期(唯一组合)'
 GO
 COMMENT ON COLUMN DAILY_PLANS.ITEMS_ORDER  IS '排序后的工作项ID序列(JSON)'
 GO
-CREATE UNIQUE INDEX IDX_DAILYPLAN_DATE_USER ON DAILY_PLANS(PLAN_DATE, USER_ID) TABLESPACE USERS
+CREATE UNIQUE INDEX IDX_DAILYPLAN_DATE_USER ON DAILY_PLANS(PLAN_DATE, USER_ID)
 GO
 
--- 2.15 WORK_LOGS - 工作项变更日志表
+-- 2.14 WORK_LOGS - 工作项变更日志表
 CREATE TABLE WORK_LOGS (
     ID              NUMBER(10)    GENERATED BY DEFAULT ON NULL AS IDENTITY (START WITH 1 INCREMENT BY 1) PRIMARY KEY,
     WORK_ITEM_ID    NUMBER(10),
@@ -481,133 +447,24 @@ CREATE TABLE WORK_LOGS (
     DESCRIPTION     CLOB,
     CREATED_AT      TIMESTAMP     DEFAULT SYSTIMESTAMP,
     CONSTRAINT FK_WORKLOG_ITEM FOREIGN KEY (WORK_ITEM_ID) REFERENCES WORK_ITEMS(ID) ON DELETE CASCADE
-) TABLESPACE USERS
+)
 GO
 COMMENT ON TABLE  WORK_LOGS           IS '工作管理-工作项操作变更日志'
 GO
 COMMENT ON COLUMN WORK_LOGS.ACTION    IS '操作动作: create/update/delete/status_change'
 GO
-CREATE INDEX IDX_WORKLOG_ITEM_ID   ON WORK_LOGS(WORK_ITEM_ID) TABLESPACE USERS
+CREATE INDEX IDX_WORKLOG_ITEM_ID   ON WORK_LOGS(WORK_ITEM_ID)
 GO
-CREATE INDEX IDX_WORKLOG_CREATED   ON WORK_LOGS(CREATED_AT)   TABLESPACE USERS
+CREATE INDEX IDX_WORKLOG_CREATED   ON WORK_LOGS(CREATED_AT)
 GO
 
 -- ----------------------------------------------------------------------------
 -- 3. INSERT INIT DATA - 初始化基础数据
 -- ----------------------------------------------------------------------------
+-- ⚠️ 不插入任何机台数据: EQUIPMENTINFO 已是生产真实数据，直接展示即可。
+--    以下只插入业务基础数据 (项目/任务/需求/用户/系统设置/工作类别)。
 
--- ================================================================
--- ⚠️  量产环境特别提醒：
---     3.1 / 3.2 是 EQUIPMENT / EQUIPMENT_TYPES 的【演示数据】，
---     后续会在 prod_equipment_mapping.sql 中被 DROP/替换，
---     因此这里保留演示插入 —— 仅用于没有量产数据的本地/测试环境。
--- ================================================================
-
--- 3.1 机台类型 EQUIPMENT_TYPES (8种 — 演示数据，量产后会被视图覆盖)
-INSERT INTO EQUIPMENT_TYPES (NAME, DESCRIPTION, MANUFACTURER) VALUES ('光刻机',     '光刻设备',                 'ASML')
-GO
-INSERT INTO EQUIPMENT_TYPES (NAME, DESCRIPTION, MANUFACTURER) VALUES ('刻蚀机',     '刻蚀设备',                 'Applied Materials')
-GO
-INSERT INTO EQUIPMENT_TYPES (NAME, DESCRIPTION, MANUFACTURER) VALUES ('薄膜沉积',   '薄膜沉积设备',             'Lam Research')
-GO
-INSERT INTO EQUIPMENT_TYPES (NAME, DESCRIPTION, MANUFACTURER) VALUES ('离子注入',   '离子注入设备',             'Axcelis')
-GO
-INSERT INTO EQUIPMENT_TYPES (NAME, DESCRIPTION, MANUFACTURER) VALUES ('CMP',        '化学机械抛光',             'Applied Materials')
-GO
-INSERT INTO EQUIPMENT_TYPES (NAME, DESCRIPTION, MANUFACTURER) VALUES ('清洗机',     '晶圆清洗设备',             'TEL')
-GO
-INSERT INTO EQUIPMENT_TYPES (NAME, DESCRIPTION, MANUFACTURER) VALUES ('检测设备',   '检测设备',                 'KLA-Tencor')
-GO
-INSERT INTO EQUIPMENT_TYPES (NAME, DESCRIPTION, MANUFACTURER) VALUES ('PECVD',      '等离子体增强化学气相沉积', 'TEL')
-GO
-
--- 3.2 机台 EQUIPMENT — 演示数据(80台)，量产环境将替换为视图，此处保留仅为单机演示
--- 3.2 机台 EQUIPMENT (80条演示数据 — 仅本地测试用，量产会替换为视图)
---     同时填充 ORM 核心列 + 量产 20 列，模拟 PANJOB.EQUIPMENTINFO 数据结构
-DECLARE
-  v_type_id      NUMBER;
-  v_type_name    VARCHAR2(100);
-  v_name         VARCHAR2(200);
-  v_location     VARCHAR2(200);
-  v_driver       VARCHAR2(200);
-  v_status       VARCHAR2(20);
-  v_fab          CHAR(1);
-  v_line         VARCHAR2(32);
-  v_area         VARCHAR2(32);
-  v_area_list    SYS.ODCIVARCHAR2LIST := SYS.ODCIVARCHAR2LIST('TF','DF','FF','CF','ET','PH','CMP','CVD');
-  v_ccserver     VARCHAR2(32);
-  v_os           VARCHAR2(32);
-  v_srvtype      VARCHAR2(32);
-  v_moxa         VARCHAR2(32);
-  v_sourcecode   VARCHAR2(32);
-BEGIN
-  FOR t IN 1..8 LOOP
-    v_type_id   := t;
-    v_sourcecode := TO_CHAR(t);  -- 类型 ID 直接对应 SOURCECODE (1~8)
-    SELECT NAME INTO v_type_name FROM EQUIPMENT_TYPES WHERE ID = v_type_id;
-    FOR i IN 0..9 LOOP
-      v_name     := v_type_name || '-' || TO_CHAR(i+1, 'FM00');
-      v_fab      := CHR(65 + MOD(i, 4));                    -- A/B/C/D
-      v_line     := 'T' || (10 + i);                        -- T10~T19
-      v_area     := v_area_list(MOD(t-1, 8)+1);             -- 8 种厂区循环
-      v_location := 'Fab-' || v_fab || ' / Line:' || v_line || ' / Area:' || v_area;
-      -- 状态: 90% online, 10% maintenance
-      IF   i = 9 THEN v_status := 'maintenance';
-      ELSE            v_status := 'online';
-      END IF;
-      -- OS: 前 5 台 Win, 后 5 台随机
-      IF   i < 5 THEN v_os := 'Win2019';
-      ELSE            v_os := 'RHEL7.9';
-      END IF;
-      v_srvtype  := 'DL380 G' || (10 - MOD(i,5));
-      v_ccserver := 'C' || LPAD(t,2,'0') || 'C' || LPAD(i+21,3,'0');   -- C01C021 风格
-      v_moxa     := TO_CHAR(9600 + i*100);
-      v_driver   := 'SRVTYPE:' || v_srvtype || ' OS:' || v_os;
-
-      INSERT INTO EQUIPMENT (
-          TYPE_ID, NAME, LOCATION, STATUS, DRIVER_VERSION, INSTALLED_AT,
-          EQUIPMENT, EQUIPMENTTYPE, EQUIPMENTMODEL, LINE, CCSERVER, AREA,
-          MOXA, NPORT, NPORTIP, NPORTCOM, CHARGEMAN,
-          SMIF1NPORTIP, SMIF2NPORTIP, SMIF3NPORTIP, SMIF4NPORTIP,
-          OS, SRVTYPE, SOURCECODE
-      ) VALUES (
-          v_type_id, v_name, v_location, v_status, v_driver,
-          DATE '2024-01-01' + (MOD(t*10+i, 365)),
-          v_name,                    -- EQUIPMENT (机台编号 = NAME)
-          v_type_name,               -- EQUIPMENTTYPE
-          v_type_name || '-' || CASE t
-                                     WHEN 1 THEN 'ASM-E10'
-                                     WHEN 2 THEN 'KEDJ-8350V'
-                                     WHEN 3 THEN 'KEDJ-82800S'
-                                     WHEN 4 THEN 'DNSA8S2000'
-                                     WHEN 5 THEN 'OP5205T'
-                                     WHEN 6 THEN 'CENTURA'
-                                     WHEN 7 THEN 'KIYO-90'
-                                     ELSE         'SMART-300'
-                                 END,      -- EQUIPMENTMODEL
-          v_line,                    -- LINE
-          v_ccserver,                -- CCSERVER
-          v_area,                    -- AREA
-          v_moxa,                    -- MOXA (baud_rate)
-          TO_CHAR(5000 + t*100 + i),-- NPORT
-          '192.168.' || t || '.' || (100 + i),   -- NPORTIP
-          'COM' || (1 + MOD(i,8)),  -- NPORTCOM
-          CASE MOD(i,4) WHEN 0 THEN 'S.Q' WHEN 1 THEN 'Y.L' WHEN 2 THEN 'J.W' ELSE 'K.C' END, -- CHARGEMAN
-          '192.168.' || (10+t) || '.' || (10+i), -- SMIF1NPORTIP
-          '192.168.' || (20+t) || '.' || (10+i), -- SMIF2NPORTIP
-          '192.168.' || (30+t) || '.' || (10+i), -- SMIF3NPORTIP
-          '192.168.' || (40+t) || '.' || (10+i), -- SMIF4NPORTIP
-          v_os,                      -- OS
-          v_srvtype,                 -- SRVTYPE
-          v_sourcecode               -- SOURCECODE (1~8, 对应 git_source_map)
-      );
-    END LOOP;
-  END LOOP;
-  COMMIT;
-END;
-GO
-
--- 3.3 项目 PROJECTS (5个 — 业务种子数据)
+-- 3.1 项目 PROJECTS (5个 — 业务种子数据)
 INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('机台驱动升级项目', '升级所有机台的驱动版本',        65.0)
 GO
 INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('CIM系统优化',     '优化CIM系统性能',               40.0)
@@ -619,7 +476,7 @@ GO
 INSERT INTO PROJECTS (NAME, DESCRIPTION, PROGRESS) VALUES ('数据采集系统',    '升级数据采集系统',               50.0)
 GO
 
--- 3.4 任务 TASKS (8条 — 业务种子数据)
+-- 3.2 任务 TASKS (8条 — 业务种子数据)
 INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (1, '光刻机驱动开发',     'high')
 GO
 INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (1, '刻蚀机驱动测试',     'medium')
@@ -637,7 +494,8 @@ GO
 INSERT INTO TASKS (PROJECT_ID, TITLE, PRIORITY) VALUES (5, '数据采集脚本开发',   'high')
 GO
 
--- 3.5 需求 REQUIREMENTS (5条 — 业务种子数据)
+-- 3.3 需求 REQUIREMENTS (5条 — 业务种子数据)
+--     示例: 关联到 EQUIPMENTINFO.EQUIPMENT 中真实存在的机台编号 (执行人按实际修改)
 INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('机台A驱动升级',   '将机台A的驱动从v1升级到v2',       'high',     1)
 GO
 INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('新增机台配置项',   '为机台新增配置项支持',             'medium',   1)
@@ -649,7 +507,7 @@ GO
 INSERT INTO REQUIREMENTS (TITLE, DESCRIPTION, PRIORITY, PROJECT_ID) VALUES ('系统告警优化',    '优化系统告警机制',                 'medium',   2)
 GO
 
--- 3.6 用户 USERS (3个默认用户)
+-- 3.4 用户 USERS (3个默认用户)
 INSERT INTO USERS (USERNAME, DISPLAY_NAME, EMAIL, ROLE, DEPARTMENT, TEAM) VALUES ('administrator', '管理员',   'admin@company.com', 'admin',      'IT',   'CIM')
 GO
 INSERT INTO USERS (USERNAME, DISPLAY_NAME, EMAIL, ROLE, DEPARTMENT, TEAM) VALUES ('eap.engineer',  'EAP工程师', 'eap@company.com',   'engineer',   '制造', 'EAP')
@@ -657,7 +515,7 @@ GO
 INSERT INTO USERS (USERNAME, DISPLAY_NAME, EMAIL, ROLE, DEPARTMENT, TEAM) VALUES ('cim.user',      'CIM用户',  'cim@company.com',   'user',       '制造', 'CIM')
 GO
 
--- 3.7 系统设置 SYSTEM_SETTINGS (general/ai/notes 7项默认值)
+-- 3.5 系统设置 SYSTEM_SETTINGS (general/ai/notes/equipment 9项默认值)
 INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('system_name',       'CIM Work Manager',                 '系统名称',                  'general')
 GO
 INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('openai_api_key',    '',                                  'OpenAI API Key',            'ai')
@@ -672,8 +530,13 @@ INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('notes_u
 GO
 INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('notes_password',    '',                                  'HCL Notes Password',        'notes')
 GO
+-- Git Source 配置 (前端 🐙 按钮跳转用)
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('git_source_base_url', 'https://github.com/leanerone/web/blob/main/equipment', 'Git 源码基础 URL', 'equipment')
+GO
+INSERT INTO SYSTEM_SETTINGS (KEY, VALUE, DESCRIPTION, CATEGORY) VALUES ('git_source_map', '{"1":"cpc/asm_eagle","2":"pecvd/asm_trident","3":"gateox/tel_8280","4":"tteox/thermawave_op5205t","5":"cateox/asml_8350"}', 'SOURCECODE→Git子路径映射(JSON)', 'equipment')
+GO
 
--- 3.8 工作类别 WORK_CATEGORIES (8个字典)
+-- 3.6 工作类别 WORK_CATEGORIES (8个字典)
 INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Operation/Follow up', 'operation',    '日常操作跟进',     '🔄', '#3B82F6', 1)
 GO
 INSERT INTO WORK_CATEGORIES (NAME, CODE, DESCRIPTION, ICON, COLOR, SORT_ORDER) VALUES ('Requirement',         'requirement',  '需求跟进与管理',   '📋', '#8B5CF6', 2)
@@ -697,7 +560,7 @@ GO
 SELECT 'PROJECTS'         AS TBL, COUNT(*) AS CNT FROM PROJECTS         UNION ALL
 SELECT 'TASKS',             COUNT(*) FROM TASKS              UNION ALL
 SELECT 'EQUIPMENT_TYPES',   COUNT(*) FROM EQUIPMENT_TYPES    UNION ALL
-SELECT 'EQUIPMENT',         COUNT(*) FROM EQUIPMENT          UNION ALL
+SELECT 'EQUIPMENTINFO',     COUNT(*) FROM EQUIPMENTINFO      UNION ALL
 SELECT 'CONFIGURATIONS',    COUNT(*) FROM CONFIGURATIONS     UNION ALL
 SELECT 'REQUIREMENTS',      COUNT(*) FROM REQUIREMENTS       UNION ALL
 SELECT 'CHANGE_RECORDS',    COUNT(*) FROM CHANGE_RECORDS     UNION ALL
@@ -713,14 +576,14 @@ ORDER BY 1
 GO
 
 PRINT '==============================================================='
-PRINT ' init_oracle.sql 15 张业务表创建完成!                          '
-PRINT ' 预期(演示数据): PROJECTS=5, TASKS=8, EQUI_TYPES=8, EQUI=80,'
-PRINT '                 REQUIREMENTS=5, USERS=3, SYS_SET=7, CAT=8 '
+PRINT ' init_oracle.sql 执行完成!                                     '
+PRINT ' 已创建 13 张业务表 + 1 个类型视图 (EQUIPMENT_TYPES 视图)     '
+PRINT ' 业务基础数据: PROJECTS=5, TASKS=8, REQUIREMENTS=5, USERS=3,   '
+PRINT '               SYS_SET=9(含 git_source_* 2条), CAT=8          '
 PRINT '                                                               '
-PRINT ' ⚠️ 【量产环境下一步必做】                                     '
-PRINT '    立即执行 prod_equipment_mapping.sql (F5整文件):            '
-PRINT '      → 把 EQUIPMENT / EQUIPMENT_TYPES 替换为只读视图         '
-PRINT '      → 指向已存在的 PANJOB.EQUIPMENTINFO                     '
-PRINT '      → 写入 git_source_map 映射 (SOURCECODE → Git URL)      '
+PRINT ' ✅ EQUIPMENTINFO = 量产真实机台数据 (未受影响, 直接读取展示) '
+PRINT ' ✅ EQUIPMENT_TYPES 视图 = 从 EQUIPMENTINFO 去重类型          '
+PRINT '                                                               '
+PRINT ' 单步部署完成! 直接启动后端即可使用。                          '
 PRINT '==============================================================='
 GO

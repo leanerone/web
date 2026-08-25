@@ -9,7 +9,6 @@ import socket
 import time
 import jwt
 from typing import Optional
-from config.settings import settings
 
 
 # 简单的用户数据库（实际应接入LDAP/AD）
@@ -20,15 +19,9 @@ KNOWN_USERS = {
     "cim.user": {"name": "CIM用户", "role": "user", "department": "制造", "team": "CIM"},
 }
 
+JWT_SECRET = "cim-work-manager-secret-key-2026"
 JWT_ALGORITHM = "HS256"
-
-
-def _jwt_secret() -> str:
-    return settings.jwt_secret
-
-
-def _jwt_expire_hours() -> int:
-    return settings.jwt_expire_hours
+JWT_EXPIRE_HOURS = 8
 
 
 def get_current_windows_user() -> dict:
@@ -77,15 +70,15 @@ def generate_token(user: dict) -> str:
         "name": user["display_name"],
         "role": user["role"],
         "iat": int(time.time()),
-        "exp": int(time.time()) + _jwt_expire_hours() * 3600,
+        "exp": int(time.time()) + JWT_EXPIRE_HOURS * 3600,
     }
-    return jwt.encode(payload, _jwt_secret(), algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 def verify_token(token: str) -> Optional[dict]:
     """验证JWT token"""
     try:
-        payload = jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload
     except jwt.PyJWTError:
         return None

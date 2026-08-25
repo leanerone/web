@@ -7,20 +7,13 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;
 }
 
-// 精炼到 brand(teal) 主色，避免渐变与悬浮缩放带来的视觉噪声
 const variantStyles = {
-  primary:
-    'bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800 shadow-soft',
-  secondary:
-    'bg-white text-slate-700 hover:bg-slate-50 border border-slate-200 active:bg-slate-100',
-  success:
-    'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200',
-  warning:
-    'bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200',
-  danger:
-    'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200',
-  ghost:
-    'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+  primary: 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white hover:from-cyan-400 hover:to-blue-500 shadow-lg hover:shadow-cyan-500/25',
+  secondary: 'bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-300',
+  success: 'bg-green-50 text-green-600 hover:bg-green-100 border border-green-200',
+  warning: 'bg-orange-50 text-orange-600 hover:bg-orange-100 border border-orange-200',
+  danger: 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-200',
+  ghost: 'text-gray-600 hover:bg-gray-100 hover:text-gray-800',
 };
 
 const sizeStyles = {
@@ -41,7 +34,7 @@ export default function Button({
   return (
     <button
       disabled={disabled || loading}
-      className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/40 focus-visible:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed ${variantStyles[variant]} ${sizeStyles[size]} ${className || ''}`}
+      className={`inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-all duration-200 transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 ${variantStyles[variant]} ${sizeStyles[size]} ${className || ''}`}
       {...props}
     >
       {loading ? (

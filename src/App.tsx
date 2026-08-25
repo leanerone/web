@@ -17,7 +17,6 @@ import Login from '@/pages/Login';
 import WorkItems from '@/pages/WorkItems';
 import WorkDashboard from '@/pages/WorkDashboard';
 import { useAuthStore } from '@/stores/authStore';
-import useAppStore from '@/stores/appStore';
 
 const pageTitles: Record<string, { title: string; subtitle?: string }> = {
   '/': { title: '仪表盘', subtitle: '工作概览与统计' },
@@ -27,7 +26,7 @@ const pageTitles: Record<string, { title: string; subtitle?: string }> = {
   '/projects': { title: '项目管理', subtitle: '项目进度与任务跟踪' },
   '/projects/:id': { title: '项目详情', subtitle: '项目规划与任务管理' },
   '/equipment': { title: '机台管理', subtitle: '设备状态与配置管理' },
-  '/equipment/:id': { title: '机台详情', subtitle: '设备详细信息' },
+  '/equipment/:equipmentName': { title: '机台详情', subtitle: '设备详细信息' },
   '/requirements': { title: '需求管理', subtitle: '用户需求与变更记录' },
   '/requirements/:id': { title: '需求详情', subtitle: '需求详细信息' },
   '/ai-assistant': { title: 'AI规划助手', subtitle: '智能工作规划' },
@@ -40,7 +39,6 @@ const pageTitles: Record<string, { title: string; subtitle?: string }> = {
 function PageContent() {
   const location = useLocation();
   const path = location.pathname;
-  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   let pageInfo = pageTitles[path];
 
   if (!pageInfo) {
@@ -49,7 +47,7 @@ function PageContent() {
   }
 
   return (
-    <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ${sidebarCollapsed ? 'ml-[68px]' : 'ml-64'}`}>
+    <div className="flex-1 flex flex-col overflow-hidden ml-64">
       <Header title={pageInfo.title} subtitle={pageInfo.subtitle} />
       <main className="flex-1 overflow-auto p-6">
         <Routes>

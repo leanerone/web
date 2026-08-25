@@ -51,7 +51,7 @@ def _call_openai_plan(input_text: str, tasks: List[Dict] = None, projects: List[
     """
     
     response = client.chat.completions.create(
-        model=settings.ai_model,
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "你是一位专业的半导体CIM EAP工程师助手，擅长项目管理、机台维护和工作规划。"},
             {"role": "user", "content": prompt}
@@ -102,7 +102,7 @@ def _call_openai_optimize(tasks: List[Dict]) -> Dict:
     
     try:
         response = client.chat.completions.create(
-            model=settings.ai_model,
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "你是一位专业的半导体CIM EAP工程师助手，擅长任务管理和优化。"},
                 {"role": "user", "content": prompt}
@@ -156,7 +156,7 @@ def _call_openai_weekly_report(start_date: str, end_date: str, projects: List[Di
     """
     
     response = client.chat.completions.create(
-        model=settings.ai_model,
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "你是一位专业的半导体CIM EAP工程师助手，擅长撰写专业的工作周报。"},
             {"role": "user", "content": prompt}
@@ -361,7 +361,7 @@ def _call_openai_standup(work_items: List[Dict] = None, target_date: str = None)
 """
 
     response = client.chat.completions.create(
-        model=settings.ai_model,
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "你是一位专业的工作效率助手，擅长帮助工程师规划每日工作。"},
             {"role": "user", "content": prompt}
