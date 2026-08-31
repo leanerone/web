@@ -21,7 +21,8 @@
 6. [EQUIPMENTINFO 字段映射总览](#5-equipmentinfo-字段映射总览)
 7. [Git Source (SOURCECODE) 对接说明](#6-git-source-sourcecode-对接说明)
 8. [故障排查 FAQ](#7-故障排查-faq)
-9. [附录：业务表一览](#8-附录业务表一览)
+9. [附录 A：业务表一览](#8-附录业务表一览)
+10. [附录 B：本地 SQLite 开发模式（不等 DBA 授权时用）](#9-附录-b本地-sqlite-开发模式不等-dba-授权时用)
 
 ---
 
@@ -616,6 +617,8 @@ GO
 | `DEPLOY_ORACLE_SOP.md` | 本 SOP |
 | `backend/data/init_oracle.sql` | **单步部署 SQL**：建 13 张业务表 + SEQUENCE/TRIGGER + 业务种子数据 |
 | `backend/.env.oracle.example` | .env 模板（ORACLE_USER=PANJOB，复制为 .env 使用） |
+| `backend/init_db.py` | **SQLite 本地开发初始化**：8 条机台样本 + 项目/任务/需求种子数据（幂等） |
+| `backend/import_equipment_csv.py` | **SQLite 机台数据导入**：从 PANJOB 导出的 CSV 导入到 EQUIPMENTINFO |
 | `backend/config/settings.py` | 读取 .env (DATABASE_TYPE, ORACLE_USER, ORACLE_PASSWORD, ORACLE_DSN) |
 | `backend/database/session.py` | 根据 DATABASE_TYPE 动态生成 Oracle/SQLite URL (无需改) |
 | `backend/database/models.py` | `Equipment.__tablename__="EQUIPMENTINFO"` 直接映射 18 列真表 |
@@ -625,6 +628,99 @@ GO
 | `src/types/index.ts` | 前端 Equipment 接口：扩充 source_code / line / chargeman / os 等量产字段 |
 | `src/pages/Equipment.tsx` | 机台管理 UI：14 列量产真实信息展示 + 🐙 Git Source 跳转按钮 + 前端类型去重 |
 | `backend/requirements.txt` | 含 `oracledb==2.4.0` (thin 模式, 不用 Oracle Client) |
+
+---
+
+## 9. 附录 B：本地 SQLite 开发模式（不等 DBA 授权时用）
+
+> 适用场景：等 DBA 给 PANJOB 授权期间，本地开发调试用 SQLite。生产环境仍用 Oracle + init_oracle.sql。
+
+### 9.1 启用 SQLite 模式
+
+**方式 1（最简）：不创建 .env 文件**
+- `settings.py` 默认 `DATABASE_TYPE=sqlite`，不创建 .env 即自动走 SQLite
+- SQLite 文件位置：`backend/data/example_db.sqlite`（自动创建）
+
+**方式 2：显式配置**
+```dotenv
+# backend/.env
+DATABASE_TYPE=sqlite
+SQLITE_URL=./data/example_db.sqlite
+```
+
+### 9.2 初始化数据（幂等，可反复执行）
+
+```powershell
+cd backend
+python init_db.py
+```
+
+**输出：**
+```
+[1/5] 建表完成 (13 张业务表 + EQUIPMENTINFO)
+[2/5] 机台样本数据 (模拟量产 EQUIPMENTINFO 18 列) — 8 条
+[3/5] 项目种子数据 — 5 条
+[4/5] 任务种子数据 — 8 条
+[5/5] 需求种子数据 — 5 条
+```
+
+- 机台样本：8 条覆盖 CATEOX/GATEOX/CPC/TTOX/PECVD/LITHO/ETCH 类型，status 由 OS 字段派生（Win2019→online, NULL→offline）
+- 用户/系统设置/工作类别：由 `main.py` 启动时自动初始化（administrator/eap.engineer/cim.user + 9 项系统设置 + 8 个工作类别）
+
+### 9.3 启动后端 + 前端
+
+```powershell
+# 后端
+cd backend
+uvicorn main:app --reload
+
+# 前端 (另开终端)
+npm run dev
+```
+
+访问 `http://localhost:5173/equipment` → 应看到 8 条样本机台数据，与生产环境 UI 完全一致。
+
+### 9.4 从 PANJOB 导出真实数据导入 SQLite
+
+**步骤 1：从 PANJOB 导出 CSV**
+- ADS 连接 PANJOB 库，右键 EQUIPMENTINFO 表 → Export Data → CSV
+- 或执行 `SELECT * FROM EQUIPMENTINFO` 后导出结果为 CSV
+- 保存为 `backend/data/equipment_export.csv`
+
+**步骤 2：导入到 SQLite**
+```powershell
+cd backend
+# 默认跳过已存在的 equipment (推荐, 不破坏现有关联)
+python import_equipment_csv.py data/equipment_export.csv
+
+# 或: 清空后重新导入 (替换 init_db.py 的 8 条样本)
+python import_equipment_csv.py data/equipment_export.csv --replace
+```
+
+**CSV 列名支持（自动识别，大小写不敏感）：**
+- 大写（PANJOB 导出格式）：`EQUIPMENT, EQUIPMENTTYPE, EQUIPMENTMODEL, ...`
+- 小写：`equipment, equipment_type, equipment_model, ...`
+- 带下划线：`equipment_type` ↔ `EQUIPMENTTYPE` 自动匹配
+
+### 9.5 SQLite → Oracle 切换
+
+切换到 Oracle 不需要改代码，只改 .env：
+
+```dotenv
+# 改 .env 即可, 重启后端生效
+DATABASE_TYPE=oracle
+ORACLE_USER=PANJOB
+ORACLE_PASSWORD=xxx
+ORACLE_DSN=10.20.30.40:1521/ORCL
+```
+
+| 项 | SQLite 本地 | Oracle 生产 |
+|----|------------|------------|
+| 建表 | `main.py` 自动 `create_all` | `init_oracle.sql` 在 ADS 执行 |
+| 自增 ID | SQLite AUTOINCREMENT | SEQUENCE + TRIGGER |
+| 机台数据 | `init_db.py` 8 条样本 / CSV 导入 | 直接读 EQUIPMENTINFO 真表 |
+| 业务种子数据 | `init_db.py` | `init_oracle.sql` 段 4 |
+| 机台表 | 本地 SQLite 可写 | 生产只读 |
 
 ---
 

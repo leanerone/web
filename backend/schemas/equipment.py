@@ -19,24 +19,26 @@ class EquipmentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     # ── EQUIPMENTINFO 18 真实列 ──
+    # 不用 validation_alias: from_attributes=True 时 Pydantic 用字段名从 ORM 对象属性取值
+    # ORM 属性名 = 字段名 (equipment_type 等), 与数据库列名 (EQUIPMENTTYPE) 通过 Column() 映射
     equipment: str                                               # 主键: 机台编号
-    equipment_type: Optional[str] = Field(default=None, validation_alias="EQUIPMENTTYPE")
-    equipment_model: Optional[str] = Field(default=None, validation_alias="EQUIPMENTMODEL")
-    line: Optional[str] = Field(default=None, validation_alias="LINE")
-    cc_server: Optional[str] = Field(default=None, validation_alias="CCSERVER")
-    area: Optional[str] = Field(default=None, validation_alias="AREA")
-    moxa: Optional[str] = Field(default=None, validation_alias="MOXA")
-    nport: Optional[str] = Field(default=None, validation_alias="NPORT")
-    nport_ip: Optional[str] = Field(default=None, validation_alias="NPORTIP")
-    nport_com: Optional[str] = Field(default=None, validation_alias="NPORTCOM")
-    chargeman: Optional[str] = Field(default=None, validation_alias="CHARGEMAN")
-    smif1_nport_ip: Optional[str] = Field(default=None, validation_alias="SMIF1NPORTIP")
-    smif2_nport_ip: Optional[str] = Field(default=None, validation_alias="SMIF2NPORTIP")
-    smif3_nport_ip: Optional[str] = Field(default=None, validation_alias="SMIF3NPORTIP")
-    smif4_nport_ip: Optional[str] = Field(default=None, validation_alias="SMIF4NPORTIP")
-    os: Optional[str] = Field(default=None, validation_alias="OS")
-    srv_type: Optional[str] = Field(default=None, validation_alias="SRVTYPE")
-    source_code: Optional[str] = Field(default=None, validation_alias="SOURCECODE")
+    equipment_type: Optional[str] = None
+    equipment_model: Optional[str] = None
+    line: Optional[str] = None
+    cc_server: Optional[str] = None
+    area: Optional[str] = None
+    moxa: Optional[str] = None
+    nport: Optional[str] = None
+    nport_ip: Optional[str] = None
+    nport_com: Optional[str] = None
+    chargeman: Optional[str] = None
+    smif1_nport_ip: Optional[str] = None
+    smif2_nport_ip: Optional[str] = None
+    smif3_nport_ip: Optional[str] = None
+    smif4_nport_ip: Optional[str] = None
+    os: Optional[str] = None
+    srv_type: Optional[str] = None
+    source_code: Optional[str] = None
 
     # ── 前端兼容 @computed_field ──
     @computed_field

@@ -102,7 +102,7 @@ class Equipment(Base):
     """
     __tablename__ = "EQUIPMENTINFO"
 
-    equipment        = Column(String(32), primary_key=True, index=True)   # 1. 机台编号 (主键)
+    equipment        = Column("EQUIPMENT", String(32), primary_key=True, index=True)   # 1. 机台编号 (主键)
     equipment_type  = Column("EQUIPMENTTYPE", String(32))                # 2. 机台类型 (例: PECVD)
     equipment_model = Column("EQUIPMENTMODEL", String(32))               # 3. 机台型号 (例: ASM Eagle-10)
     line            = Column("LINE", String(32))                         # 4. 产线 (例: T13)
