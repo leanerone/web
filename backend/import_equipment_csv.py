@@ -83,14 +83,15 @@ def parse_row(row: dict) -> dict:
 
 
 def import_csv(csv_path: str, replace: bool = False):
-    """导入 CSV 到 EQUIPMENTINFO 表"""
+    """导入 CSV 到 EQUIPMENTINFO 表
+
+    优化: 先读取全部 CSV 到内存并按 equipment 去重, 再批量插入
+          避免 auto-flush 触发的 UNIQUE constraint 冲突
+    """
     # 确保表存在
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
-    inserted = 0
-    skipped = 0
-    updated = 0
 
     try:
         if replace:
@@ -103,34 +104,46 @@ def import_csv(csv_path: str, replace: bool = False):
             print(f"CSV 列名: {reader.fieldnames}")
             print("-" * 60)
 
-            for line_no, row in enumerate(reader, start=2):
+            # 1. 读取全部行到内存, 按 equipment 去重 (后覆盖前)
+            rows_dict = {}
+            total_lines = 0
+            empty_skipped = 0
+            for row in reader:
+                total_lines += 1
                 data = parse_row(row)
                 eq_name = data.get("equipment")
                 if not eq_name:
-                    print(f"  行 {line_no}: 跳过 (equipment 主键为空)")
-                    skipped += 1
+                    empty_skipped += 1
                     continue
+                rows_dict[eq_name] = data  # 去重: 后出现的覆盖先出现的
 
-                existing = db.query(Equipment).filter(Equipment.equipment == eq_name).first()
-                if existing and not replace:
-                    print(f"  行 {line_no}: 跳过 ({eq_name} 已存在)")
+            dup_count = total_lines - len(rows_dict) - empty_skipped
+            print(f"CSV 共 {total_lines} 行 | 去重 {dup_count} 条 | 空主键 {empty_skipped} 条 | 待导入 {len(rows_dict)} 条")
+
+            # 2. 批量插入 (不在循环内 query, 避免 auto-flush 问题)
+            if not replace:
+                # 非替换模式: 先查出已存在的 equipment, 跳过
+                existing_eqs = set(
+                    r[0] for r in db.query(Equipment.equipment).filter(
+                        Equipment.equipment.in_(list(rows_dict.keys()))
+                    ).all()
+                )
+            else:
+                existing_eqs = set()  # 替换模式: 已清空, 全部新增
+
+            inserted = 0
+            skipped = 0
+            for eq_name, data in rows_dict.items():
+                if eq_name in existing_eqs:
                     skipped += 1
-                    continue
-
-                if existing and replace:
-                    # 更新现有记录
-                    for attr, value in data.items():
-                        setattr(existing, attr, value)
-                    updated += 1
                 else:
-                    # 新增
                     db.add(Equipment(**data))
                     inserted += 1
 
             db.commit()
 
         print("-" * 60)
-        print(f"导入完成: 新增 {inserted} | 更新 {updated} | 跳过 {skipped}")
+        print(f"导入完成: 新增 {inserted} | 跳过 {skipped}")
         total = db.query(Equipment).count()
         print(f"EQUIPMENTINFO 表当前共 {total} 条机台数据")
 
