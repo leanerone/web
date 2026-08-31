@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { 
-  ArrowLeft, 
-  Calendar, 
+import {
+  ArrowLeft,
   AlertTriangle,
   CheckCircle2,
   Clock,
@@ -11,30 +10,14 @@ import {
   ChevronRight,
   Cpu,
   Plus,
+  ExternalLink,
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
+import { requirementAPI, equipmentAPI } from '@/services/api';
 import type { Requirement, Equipment, ChangeRecord } from '@/types';
-
-const mockRequirements: Requirement[] = [
-  { id: 1, title: 'Lot Tracking功能增强', description: '增加Lot实时追踪功能，支持跨机台追踪，提供实时位置和状态信息。需要修改EAP驱动代码，新增追踪模块，并更新机台配置文件。涉及SECS-II协议消息扩展和数据库表结构变更。', priority: 'high', status: 'pending', created_at: '2026-07-10', updated_at: '2026-07-10' },
-  { id: 2, title: 'EPI机台参数调整', description: '调整EPI机台工艺参数配置，优化沉积效果，提高薄膜均匀性。涉及config文件修改和驱动参数调优。需要更新配方参数表并验证沉积速率和均匀性指标。', priority: 'medium', status: 'in_progress', created_at: '2026-07-08', updated_at: '2026-07-12' },
-  { id: 3, title: 'WAT数据采集优化', description: '优化WAT测试数据采集效率，减少数据传输延迟。需要重构数据采集模块并优化Oracle数据库查询性能，添加批量写入和异步采集功能。', priority: 'high', status: 'pending', created_at: '2026-07-11', updated_at: '2026-07-11' },
-  { id: 4, title: 'CMP设备驱动更新', description: '更新CMP设备驱动至v2.0版本，修复已知bug，提升设备稳定性。涉及驱动代码重构和配置兼容性测试，需要处理研磨终点检测和抛光头压力控制逻辑。', priority: 'critical', status: 'in_progress', created_at: '2026-07-05', updated_at: '2026-07-13' },
-  { id: 5, title: 'Litho机台配置修改', description: '修改光刻机曝光参数配置文件，支持新工艺配方。需要更新config文件并进行机台验证测试，涉及对准精度和曝光能量参数调整。', priority: 'medium', status: 'testing', created_at: '2026-07-03', updated_at: '2026-07-12' },
-  { id: 6, title: 'Etch设备监控增强', description: '增加刻蚀设备实时监控告警功能，支持异常状态自动推送通知。已完成开发和部署，包含RF功率监控和腔体温度告警模块。', priority: 'low', status: 'completed', created_at: '2026-06-20', updated_at: '2026-07-01' },
-  { id: 7, title: 'Diffusion炉管温控优化', description: '优化Diffusion炉管温度控制算法，提高温控精度。涉及驱动代码修改和PID参数调优，需要处理升降温曲线优化和温度均匀性提升。', priority: 'high', status: 'pending', created_at: '2026-07-09', updated_at: '2026-07-09' },
-  { id: 8, title: 'PVD设备通信协议升级', description: '升级PVD设备通信协议从SECS-I到SECS-II，提升数据传输效率。需要重写驱动通信层，处理消息格式转换和兼容性测试。', priority: 'critical', status: 'in_progress', created_at: '2026-07-06', updated_at: '2026-07-13' },
-];
-
-const mockEquipment: Equipment[] = [
-  { id: 1, ap_id: 1, ap_name: 'AP-001', eq_name: 'CATEOX-57', eq_type: 'CPC', eq_model: 'KEDJ-8350V-LPT', vendor: 'ASML', server_id: 'SRV-001', driver_type: 'TCP/IP', driver_version: 'v3.2.1', snmp_ip: '192.168.1.101', snmp_port: '161', driver1_ip: '192.168.1.101', driver1_port: '5000', driver2_ip: '', driver2_port: '', area: 'DF', baud_rate: '', status: 'online', location: 'Fab-A-1F-Bay01', installed_at: '2025-06-15', updated_at: '2026-07-13' },
-  { id: 2, ap_id: 2, ap_name: 'AP-002', eq_name: 'GATEOX-57', eq_type: 'GATEOX', eq_model: 'KEDJ-82800S', vendor: 'TEL', server_id: 'SRV-002', driver_type: 'TCP/IP', driver_version: 'v3.2.1', snmp_ip: '192.168.1.102', snmp_port: '161', driver1_ip: '192.168.1.102', driver1_port: '5001', driver2_ip: '', driver2_port: '', area: 'TF', baud_rate: '', status: 'online', location: 'Fab-A-1F-Bay02', installed_at: '2025-08-20', updated_at: '2026-07-13' },
-  { id: 3, ap_id: 3, ap_name: 'AP-003', eq_name: 'CPC-55', eq_type: 'CPC', eq_model: 'DNSA8S2000', vendor: 'DNS', server_id: 'SRV-003', driver_type: 'TCP/IP', driver_version: 'v2.1.0', snmp_ip: '192.168.1.103', snmp_port: '161', driver1_ip: '192.168.1.103', driver1_port: '5002', driver2_ip: '', driver2_port: '', area: 'TF', baud_rate: '', status: 'maintenance', location: 'Fab-B-2F-Bay05', installed_at: '2024-12-01', updated_at: '2026-07-12' },
-  { id: 4, ap_id: 4, ap_name: 'AP-004', eq_name: 'TTOX-54', eq_type: 'TTOX', eq_model: 'Thermawave OP5205T', vendor: 'Thermawave', server_id: 'SRV-004', driver_type: 'TCP/IP', driver_version: 'v4.0.0', snmp_ip: '192.168.1.104', snmp_port: '161', driver1_ip: '192.168.1.104', driver1_port: '5003', driver2_ip: '', driver2_port: '', area: 'FF', baud_rate: '', status: 'online', location: 'Fab-C-3F-Bay03', installed_at: '2025-03-10', updated_at: '2026-07-13' },
-];
 
 const mockChangeRecords: ChangeRecord[] = [
   { id: 1, requirement_id: 4, change_type: '驱动代码修改', description: '更新CMP设备驱动主程序，修复内存泄漏问题', file_path: '/drivers/cmp/driver_main.py', applied_at: '2026-07-12' },
@@ -45,9 +28,9 @@ const mockChangeRecords: ChangeRecord[] = [
 ];
 
 const statusFlow = [
-  { status: 'pending', label: '待处理', icon: Clock },
-  { status: 'in_progress', label: '处理中', icon: AlertTriangle },
-  { status: 'testing', label: '测试中', icon: FileText },
+  { status: 'dev', label: '开发中', icon: Clock },
+  { status: 'testing', label: '测试中', icon: AlertTriangle },
+  { status: 'deploying', label: '上线中', icon: FileText },
   { status: 'completed', label: '已完成', icon: CheckCircle2 },
 ];
 
@@ -56,36 +39,41 @@ export default function RequirementDetail() {
   const navigate = useNavigate();
   const [requirement, setRequirement] = useState<Requirement | null>(null);
   const [equipment, setEquipment] = useState<Equipment | null>(null);
+  const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [changeRecords, setChangeRecords] = useState<ChangeRecord[]>([]);
   const [isChangeModalOpen, setIsChangeModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<ChangeRecord>>({ change_type: '', description: '' });
   const [editData, setEditData] = useState<Partial<Requirement>>({});
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    const requirementId = parseInt(id || '0');
-    // 在所有mock数据中查找，包括动态创建的
-    const foundRequirement = mockRequirements.find((r) => r.id === requirementId);
-    if (foundRequirement) {
-      setRequirement(foundRequirement);
-      setEquipment(mockEquipment.find((e) => (e.equipment ?? String(e.id)) === foundRequirement.equipment_name) || null);
-      setChangeRecords(mockChangeRecords.filter((c) => c.requirement_id === requirementId));
-    } else {
-      // 如果找不到，创建一个通用的需求对象，确保页面能正常显示
-      setRequirement({
-        id: requirementId,
-        title: `需求 #${requirementId}`,
-        description: '该需求的详细信息正在加载中。如需查看完整内容，请返回需求列表选择对应需求。',
-        priority: 'medium',
-        status: 'pending',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-      setEquipment(null);
-      setChangeRecords([]);
-    }
-    setLoading(false);
+    const fetchData = async () => {
+      const requirementId = parseInt(id || '0');
+      try {
+        const [reqRes, equipRes] = await Promise.all([
+          requirementAPI.list(),
+          equipmentAPI.list(),
+        ]);
+        if (reqRes.success) {
+          const found = reqRes.data.find((r: Requirement) => r.id === requirementId);
+          if (found) {
+            setRequirement(found);
+            if (equipRes.success) {
+              setEquipmentList(equipRes.data);
+              setEquipment(equipRes.data.find((e: Equipment) => (e.equipment ?? String(e.id)) === found.equipment_name) || null);
+            }
+            setChangeRecords(mockChangeRecords.filter((c) => c.requirement_id === requirementId));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch requirement:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
   }, [id]);
 
   const getPriorityColor = (priority: string) => {
@@ -110,22 +98,20 @@ export default function RequirementDetail() {
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
-      pending: 'bg-gray-100 text-gray-600',
-      in_progress: 'bg-cyan-50 text-cyan-600',
+      dev: 'bg-cyan-50 text-cyan-600',
       testing: 'bg-blue-50 text-blue-600',
+      deploying: 'bg-orange-50 text-orange-600',
       completed: 'bg-green-50 text-green-600',
-      rejected: 'bg-red-50 text-red-600',
     };
     return colors[status] || 'bg-gray-100 text-gray-600';
   };
 
   const getStatusLabel = (status: string) => {
     const labels: Record<string, string> = {
-      pending: '待处理',
-      in_progress: '处理中',
+      dev: '开发中',
       testing: '测试中',
+      deploying: '上线中',
       completed: '已完成',
-      rejected: '已拒绝',
     };
     return labels[status] || status;
   };
@@ -150,33 +136,66 @@ export default function RequirementDetail() {
     setFormData({ change_type: '', description: '' });
   };
 
-  const handleEditSave = () => {
-    if (requirement && editData.title) {
-      setRequirement({
-        ...requirement,
+  const handleEditSave = async () => {
+    if (!requirement || !editData.title) return;
+    setSaving(true);
+    try {
+      const updateData: Partial<Requirement> = {
         title: editData.title,
-        description: editData.description || requirement.description,
-        priority: (editData.priority as Requirement['priority']) || requirement.priority,
-        status: (editData.status as Requirement['status']) || requirement.status,
-        updated_at: new Date().toISOString(),
-      });
+        description: editData.description ?? requirement.description,
+        priority: (editData.priority as Requirement['priority']) ?? requirement.priority,
+        status: (editData.status as Requirement['status']) ?? requirement.status,
+        equipment_name: editData.equipment_name ?? requirement.equipment_name,
+        notes_url: editData.notes_url ?? requirement.notes_url,
+      };
+      const res = await requirementAPI.update(requirement.id, updateData);
+      if (res.success) {
+        setRequirement({ ...requirement, ...updateData, updated_at: new Date().toISOString() });
+        if (editData.equipment_name !== requirement.equipment_name) {
+          setEquipment(equipmentList.find((e) => (e.equipment ?? String(e.id)) === editData.equipment_name) || null);
+        }
+      } else {
+        alert('保存失败: ' + (res.message || '未知错误'));
+      }
+    } catch (err) {
+      console.error('Failed to update requirement:', err);
+      alert('保存失败，请重试');
+    } finally {
+      setSaving(false);
     }
     setIsEditModalOpen(false);
   };
 
-  const handleDelete = () => {
-    if (confirm('确定要删除这个需求吗？')) {
-      navigate('/requirements');
+  const handleDelete = async () => {
+    if (!requirement) return;
+    if (!confirm('确定要删除这个需求吗？')) return;
+    try {
+      const res = await requirementAPI.delete(requirement.id);
+      if (res.success) {
+        navigate('/requirements');
+      } else {
+        alert('删除失败: ' + (res.message || '未知错误'));
+      }
+    } catch (err) {
+      console.error('Failed to delete requirement:', err);
+      alert('删除失败，请重试');
     }
   };
 
-  const handleStatusChange = (newStatus: string) => {
-    if (requirement) {
-      setRequirement({
-        ...requirement,
-        status: newStatus as Requirement['status'],
-        updated_at: new Date().toISOString(),
-      });
+  const handleStatusChange = async (newStatus: string) => {
+    if (!requirement) return;
+    try {
+      const res = await requirementAPI.update(requirement.id, { status: newStatus as Requirement['status'] });
+      if (res.success) {
+        setRequirement({
+          ...requirement,
+          status: newStatus as Requirement['status'],
+          updated_at: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      console.error('Failed to change status:', err);
+      alert('状态更新失败，请重试');
     }
   };
 
@@ -238,6 +257,8 @@ export default function RequirementDetail() {
               description: requirement.description,
               priority: requirement.priority,
               status: requirement.status,
+              equipment_name: requirement.equipment_name,
+              notes_url: requirement.notes_url,
             });
             setIsEditModalOpen(true);
           }}>
@@ -308,6 +329,19 @@ export default function RequirementDetail() {
             <div className="prose prose-sm max-w-none">
               <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{requirement.description}</p>
             </div>
+            {requirement.notes_url && (
+              <div className="mt-4 pt-4 border-t border-gray-200">
+                <a
+                  href={requirement.notes_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-50 text-cyan-600 rounded-lg hover:bg-cyan-100 transition text-sm font-medium"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  打开 Notes 文档
+                </a>
+              </div>
+            )}
           </Card>
 
           <Card title="变更记录">
@@ -436,7 +470,7 @@ export default function RequirementDetail() {
                   <p className="text-xs text-gray-500">{new Date(requirement.created_at).toLocaleString()}</p>
                 </div>
               </div>
-              {requirement.status !== 'pending' && (
+              {requirement.status !== 'dev' && (
                 <div className="flex items-start gap-3">
                   <div className="w-2 h-2 rounded-full bg-green-500 mt-2" />
                   <div className="flex-1">
@@ -537,7 +571,7 @@ export default function RequirementDetail() {
               <label className="block text-sm font-medium text-gray-700 mb-1">优先级</label>
               <select
                 value={editData.priority || 'medium'}
-                onChange={(e) => setEditData({ ...editData, priority: e.target.value })}
+                onChange={(e) => setEditData({ ...editData, priority: e.target.value as Requirement['priority'] })}
                 className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
               >
                 <option value="low">低</option>
@@ -549,17 +583,32 @@ export default function RequirementDetail() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">状态</label>
               <select
-                value={editData.status || 'pending'}
-                onChange={(e) => setEditData({ ...editData, status: e.target.value })}
+                value={editData.status || 'dev'}
+                onChange={(e) => setEditData({ ...editData, status: e.target.value as Requirement['status'] })}
                 className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
               >
-                <option value="pending">待处理</option>
-                <option value="in_progress">处理中</option>
+                <option value="dev">开发中</option>
                 <option value="testing">测试中</option>
+                <option value="deploying">上线中</option>
                 <option value="completed">已完成</option>
-                <option value="rejected">已拒绝</option>
               </select>
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">关联机台</label>
+            <select
+              value={editData.equipment_name || ''}
+              onChange={(e) => setEditData({ ...editData, equipment_name: e.target.value || undefined })}
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+            >
+              <option value="">不关联机台</option>
+              {equipmentList.map((eq) => (
+                <option key={eq.equipment ?? String(eq.id)} value={eq.equipment ?? String(eq.id)}>
+                  {eq.eq_name || eq.equipment || `机台 #${eq.id}`}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">选择上线机台，方便记录哪个机台需要上线</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">需求描述</label>
@@ -571,12 +620,23 @@ export default function RequirementDetail() {
               placeholder="请输入需求描述..."
             />
           </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notes 链接</label>
+            <input
+              type="url"
+              value={editData.notes_url || ''}
+              onChange={(e) => setEditData({ ...editData, notes_url: e.target.value })}
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              placeholder="https://notes.your-app.com/document/xxx"
+            />
+            <p className="text-xs text-gray-500 mt-1">点击后在详情页显示可跳转到 Notes app</p>
+          </div>
           <div className="flex items-center justify-end gap-3 pt-4">
             <Button variant="ghost" onClick={() => setIsEditModalOpen(false)}>
               取消
             </Button>
-            <Button onClick={handleEditSave} disabled={!editData.title}>
-              保存修改
+            <Button onClick={handleEditSave} disabled={!editData.title || saving}>
+              {saving ? '保存中...' : '保存修改'}
             </Button>
           </div>
         </div>

@@ -4,19 +4,14 @@ import {
   Plus,
   Search,
   Filter,
-  MoreVertical,
   Calendar,
   Flag,
-  AlertTriangle,
-  Clock,
   CheckCircle,
   X,
   Upload,
   Download,
   Trash2,
   Edit3,
-  ChevronDown,
-  ChevronRight,
   Sparkles,
   FolderPlus,
 } from 'lucide-react';
@@ -175,7 +170,7 @@ export default function WorkItems() {
     try {
       const res = await workItemsAPI.importTable(tableText);
       if (res.success) {
-        setImportedCount(res.count);
+        setImportedCount((res as any).count);
         setIsImportModalOpen(false);
         fetchWorkItems();
       }
@@ -231,7 +226,7 @@ export default function WorkItems() {
         item.created_at || '',
       ];
     });
-    const csv = [headers.join('\t'), ...rows.map((r) => r.map((c) => `"${c}"`).join('\t'))].join('\n');
+    const csv = [headers.join(','), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -526,7 +521,7 @@ function WorkItemModal({ isOpen, onClose, categories, item, onSubmit }: WorkItem
     onSubmit({
       title: title.trim(),
       details: details.trim() || undefined,
-      category_id: categoryId,
+      category_id: categoryId ?? undefined,
       urgency: urgency as any,
       importance: importance as any,
       status: status as any,

@@ -89,9 +89,11 @@ export interface Requirement {
   title: string;
   description: string;
   priority: 'low' | 'medium' | 'high' | 'critical';
-  status: 'pending' | 'in_progress' | 'testing' | 'completed' | 'rejected';
+  status: 'dev' | 'testing' | 'deploying' | 'completed';
   project_id?: number;
   equipment_name?: string;
+  notes_url?: string;
+  notes_doc_id?: number;
   created_at: string;
   updated_at: string;
   equipment?: Equipment;
@@ -188,6 +190,7 @@ export interface CreateRequirementRequest {
   priority?: string;
   project_id?: number;
   equipment_name?: string;
+  notes_url?: string;
 }
 
 export interface AIPlanRequest {

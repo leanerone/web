@@ -95,11 +95,11 @@ def init_requirements(db):
         return
 
     requirements_data = [
-        {"title": "机台A驱动升级",   "description": "将机台A的驱动从v1升级到v2",   "priority": "high",     "project_id": 1},
-        {"title": "新增机台配置项",   "description": "为机台新增配置项支持",       "priority": "medium",   "project_id": 1},
-        {"title": "机台B上线",       "description": "新机台B上线部署",             "priority": "critical", "project_id": 3},
-        {"title": "报表功能优化",     "description": "优化现有报表功能",           "priority": "low",      "project_id": 2},
-        {"title": "系统告警优化",     "description": "优化系统告警机制",           "priority": "medium",   "project_id": 2},
+        {"title": "机台A驱动升级",   "description": "将机台A的驱动从v1升级到v2",   "priority": "high",     "project_id": 1, "status": "dev"},
+        {"title": "新增机台配置项",   "description": "为机台新增配置项支持",       "priority": "medium",   "project_id": 1, "status": "dev"},
+        {"title": "机台B上线",       "description": "新机台B上线部署",             "priority": "critical", "project_id": 3, "status": "deploying"},
+        {"title": "报表功能优化",     "description": "优化现有报表功能",           "priority": "low",      "project_id": 2, "status": "testing"},
+        {"title": "系统告警优化",     "description": "优化系统告警机制",           "priority": "medium",   "project_id": 2, "status": "completed"},
     ]
     for r in requirements_data:
         db.add(Requirement(**r))

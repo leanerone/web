@@ -34,11 +34,10 @@ class EquipmentStatus(str, enum.Enum):
 
 
 class RequirementStatus(str, enum.Enum):
-    pending = "pending"
-    in_progress = "in_progress"
-    testing = "testing"
-    completed = "completed"
-    rejected = "rejected"
+    dev = "dev"                # 开发中
+    testing = "testing"        # 测试中
+    deploying = "deploying"    # 上线中
+    completed = "completed"    # 已完成
 
 
 class RequirementPriority(str, enum.Enum):
@@ -145,9 +144,11 @@ class Requirement(Base):
     title = Column(String(200), nullable=False)
     description = Column(Text)
     priority = Column(SQLAlchemyEnum(RequirementPriority), default=RequirementPriority.medium)
-    status = Column(SQLAlchemyEnum(RequirementStatus), default=RequirementStatus.pending)
+    status = Column(SQLAlchemyEnum(RequirementStatus), default=RequirementStatus.dev)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
     equipment_name = Column(String(32), ForeignKey("EQUIPMENTINFO.EQUIPMENT"), nullable=True)
+    notes_url = Column(String(1000), nullable=True)
+    notes_doc_id = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

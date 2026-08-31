@@ -12,6 +12,8 @@ class RequirementBase(BaseModel):
 class RequirementCreate(RequirementBase):
     project_id: Optional[int] = None
     equipment_name: Optional[str] = None
+    notes_url: Optional[str] = None
+    notes_doc_id: Optional[int] = None
 
 
 class RequirementUpdate(BaseModel):
@@ -21,6 +23,8 @@ class RequirementUpdate(BaseModel):
     status: Optional[str] = None
     project_id: Optional[int] = None
     equipment_name: Optional[str] = None
+    notes_url: Optional[str] = None
+    notes_doc_id: Optional[int] = None
 
 
 class RequirementResponse(RequirementBase):
@@ -28,6 +32,8 @@ class RequirementResponse(RequirementBase):
     status: str
     project_id: Optional[int] = None
     equipment_name: Optional[str] = None
+    notes_url: Optional[str] = None
+    notes_doc_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

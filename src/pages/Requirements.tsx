@@ -1,17 +1,14 @@
 import { useState, useEffect } from 'react';
-import { 
-  ClipboardList, 
-  Plus, 
-  Search, 
-  Filter, 
-  MoreHorizontal,
+import {
+  ClipboardList,
+  Plus,
+  Search,
+  Filter,
   AlertTriangle,
-  ArrowRight,
   Clock,
   CheckCircle2,
   Edit,
   Trash2,
-  Eye,
   Grid3x3,
   List,
   Zap,
@@ -20,23 +17,23 @@ import {
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { requirementAPI, equipmentAPI, projectAPI } from '@/services/api';
 import useAppStore from '@/stores/appStore';
-import type { Requirement, Equipment, CreateRequirementRequest } from '@/types';
+import type { Requirement, CreateRequirementRequest } from '@/types';
 
 
 
 // 四象限分类逻辑
 // 紧急度: critical=紧急, high=较紧急, medium=一般, low=不紧急
-// 重要性: completed=低(已完成), testing=中, pending/in_progress=高(待处理和处理中)
+// 重要性: completed=低(已完成), testing/deploying=中, dev=高(开发中)
 function getQuadrant(req: Requirement): number {
-  // Q1: 紧急且重要 (critical + pending/in_progress)
-  // Q2: 不紧急但重要 (medium/low + pending/in_progress)
-  // Q3: 紧急但不重要 (critical/high + completed/testing)
-  // Q4: 不紧急不重要 (medium/low + completed/testing)
+  // Q1: 紧急且重要 (critical + dev)
+  // Q2: 不紧急但重要 (medium/low + dev)
+  // Q3: 紧急但不重要 (critical/high + completed/testing/deploying)
+  // Q4: 不紧急不重要 (medium/low + completed/testing/deploying)
   const isUrgent = req.priority === 'critical' || req.priority === 'high';
-  const isImportant = req.status === 'pending' || req.status === 'in_progress';
+  const isImportant = req.status === 'dev';
 
   if (isUrgent && isImportant) return 1;
   if (!isUrgent && isImportant) return 2;
@@ -53,10 +50,12 @@ const quadrantConfig = [
 
 export default function Requirements() {
   const navigate = useNavigate();
-  const { requirements, equipment, projects, setRequirements, setEquipment, setProjects, addRequirement, updateRequirement, deleteRequirement } = useAppStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { requirements, equipment, projects, setRequirements, setEquipment, setProjects, addRequirement, deleteRequirement } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [equipmentFilter, setEquipmentFilter] = useState<string>(searchParams.get('equipment') || 'all');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'kanban' | 'quadrant'>('kanban');
   const [formData, setFormData] = useState<CreateRequirementRequest>({ title: '', description: '' });
@@ -93,8 +92,28 @@ export default function Requirements() {
       req.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPriority = priorityFilter === 'all' || req.priority === priorityFilter;
     const matchesStatus = statusFilter === 'all' || req.status === statusFilter;
-    return matchesSearch && matchesPriority && matchesStatus;
+    const matchesEquipment = equipmentFilter === 'all' || req.equipment_name === equipmentFilter;
+    return matchesSearch && matchesPriority && matchesStatus && matchesEquipment;
   });
+
+  // 同步 URL 参数（机台页跳转过来时自动选中）
+  useEffect(() => {
+    const eq = searchParams.get('equipment');
+    if (eq && eq !== equipmentFilter) {
+      setEquipmentFilter(eq);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  const handleEquipmentFilterChange = (val: string) => {
+    setEquipmentFilter(val);
+    if (val === 'all') {
+      searchParams.delete('equipment');
+    } else {
+      searchParams.set('equipment', val);
+    }
+    setSearchParams(searchParams, { replace: true });
+  };
 
   const handleCreate = async () => {
     if (!formData.title) return;
@@ -142,22 +161,20 @@ export default function Requirements() {
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
-      pending: 'bg-gray-100 text-gray-600',
-      in_progress: 'bg-cyan-50 text-cyan-600',
-      testing: 'bg-blue-50 text-blue-600',
+      dev: 'bg-blue-50 text-blue-600',
+      testing: 'bg-orange-50 text-orange-600',
+      deploying: 'bg-purple-50 text-purple-600',
       completed: 'bg-green-50 text-green-600',
-      rejected: 'bg-red-50 text-red-600',
     };
     return colors[status] || 'bg-gray-100 text-gray-600';
   };
 
   const getStatusLabel = (status: string) => {
     const labels: Record<string, string> = {
-      pending: '待处理',
-      in_progress: '处理中',
+      dev: '开发中',
       testing: '测试中',
+      deploying: '上线中',
       completed: '已完成',
-      rejected: '已拒绝',
     };
     return labels[status] || status;
   };
@@ -168,7 +185,7 @@ export default function Requirements() {
     return eq ? (eq.eq_name || eq.equipment || '未知机台') : equipmentName;
   };
 
-  const statusOrder = { pending: 0, in_progress: 1, testing: 2, completed: 3, rejected: 4 };
+  const statusOrder = { dev: 0, testing: 1, deploying: 2, completed: 3 };
   const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
 
   const sortedRequirements = [...filteredRequirements].sort((a, b) => {
@@ -211,10 +228,25 @@ export default function Requirements() {
                 className="px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500 appearance-none w-full sm:w-36"
               >
                 <option value="all">全部状态</option>
-                <option value="pending">待处理</option>
-                <option value="in_progress">处理中</option>
+                <option value="dev">开发中</option>
                 <option value="testing">测试中</option>
+                <option value="deploying">上线中</option>
                 <option value="completed">已完成</option>
+              </select>
+              <select
+                value={equipmentFilter}
+                onChange={(e) => handleEquipmentFilterChange(e.target.value)}
+                className="px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500 appearance-none w-full sm:w-44"
+                title="按关联机台筛选"
+              >
+                <option value="all">全部机台</option>
+                {equipment.map((item) => {
+                  const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
+                  const label = item.eq_name || item.equipment || `机台 #${item.id}`;
+                  return (
+                    <option key={eqKey} value={eqKey}>{label}</option>
+                  );
+                })}
               </select>
             </div>
             <div className="flex items-center gap-3">
@@ -248,8 +280,8 @@ export default function Requirements() {
 
         {/* 看板视图 */}
         {viewMode === 'kanban' && (
-          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-            {['pending', 'in_progress', 'testing', 'completed', 'rejected'].map((status) => {
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+            {['dev', 'testing', 'deploying', 'completed'].map((status) => {
               const statusRequirements = sortedRequirements.filter((r) => r.status === status);
               return (
                 <Card key={status} title={getStatusLabel(status)} className="lg:col-span-1">

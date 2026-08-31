@@ -15,13 +15,11 @@ import Users from '@/pages/Users';
 import Settings from '@/pages/Settings';
 import Login from '@/pages/Login';
 import WorkItems from '@/pages/WorkItems';
-import WorkDashboard from '@/pages/WorkDashboard';
 import { useAuthStore } from '@/stores/authStore';
 
 const pageTitles: Record<string, { title: string; subtitle?: string }> = {
   '/': { title: '仪表盘', subtitle: '工作概览与统计' },
   '/dashboard': { title: '仪表盘', subtitle: '工作概览与统计' },
-  '/work-dashboard': { title: '工作仪表盘', subtitle: '今日工作总览' },
   '/work-items': { title: '工作管理', subtitle: '管理日常工作项目' },
   '/projects': { title: '项目管理', subtitle: '项目进度与任务跟踪' },
   '/projects/:id': { title: '项目详情', subtitle: '项目规划与任务管理' },
@@ -51,9 +49,8 @@ function PageContent() {
       <Header title={pageInfo.title} subtitle={pageInfo.subtitle} />
       <main className="flex-1 overflow-auto p-6">
         <Routes>
-          <Route path="/" element={<Navigate to="/work-dashboard" replace />} />
+          <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/work-dashboard" element={<WorkDashboard />} />
           <Route path="/work-items" element={<WorkItems />} />
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />

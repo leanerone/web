@@ -1,16 +1,24 @@
 import { useState, useEffect, useMemo } from 'react';
-import { 
-  Cpu, 
-  Search, 
-  Filter, 
+import {
+  Cpu,
+  Search,
+  Filter,
   RefreshCw,
   Database,
   Eye,
   Download,
   Github,
+  Copy,
+  Link2,
+  Settings,
+  Check,
+  Plus,
+  Trash2,
+  ExternalLink,
 } from 'lucide-react';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
+import Modal from '@/components/Modal';
 import { useNavigate } from 'react-router-dom';
 import { equipmentAPI, settingsAPI } from '@/services/api';
 import useAppStore from '@/stores/appStore';
@@ -40,13 +48,20 @@ export default function Equipment() {
   // Git Source 映射配置 (来自 SYSTEM_SETTINGS)
   const [gitBaseUrl, setGitBaseUrl] = useState<string>(DEFAULT_GIT_BASE_URL);
   const [gitSourceMap, setGitSourceMap] = useState<Record<string, string>>(DEFAULT_GIT_SOURCE_MAP);
+  // Git Source 编辑弹窗
+  const [isGitModalOpen, setIsGitModalOpen] = useState(false);
+  const [gitEditBaseUrl, setGitEditBaseUrl] = useState('');
+  const [gitEditMap, setGitEditMap] = useState<Array<{ code: string; path: string }>>([]);
+  const [gitSaving, setGitSaving] = useState(false);
+  // 复制成功提示
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   /** 加载机台列表 + Git Source 映射 (并行) */
   const fetchEquipment = async () => {
     setLoading(true);
     try {
       const [eqRes, setRes] = await Promise.all([
-        equipmentAPI.list({ limit: 1000 }),
+        equipmentAPI.list({ page: 1, limit: 1000 }),
         settingsAPI.list('equipment').catch(() => ({ success: false, data: [] as any[] })),
       ]);
       if (eqRes.success) {
@@ -102,6 +117,66 @@ export default function Equipment() {
     const sub = gitSourceMap[sc];
     if (!sub) return '';
     return `${gitBaseUrl.replace(/\/$/, '')}/${sub}`;
+  };
+
+  /** 复制机台编号到剪贴板 */
+  const handleCopyCode = async (item: Equipment) => {
+    const text = item.eq_name || item.equipment || String(item.id);
+    const key = String(item.equipment ?? item.id ?? item.eq_name);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1500);
+    } catch (err) {
+      console.error('复制失败:', err);
+      // fallback: 用 textarea
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch {}
+      document.body.removeChild(ta);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 1500);
+    }
+  };
+
+  /** 跳转到该机台关联的需求列表 */
+  const handleViewRequirements = (item: Equipment) => {
+    const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
+    navigate(`/requirements?equipment=${encodeURIComponent(eqKey)}`);
+  };
+
+  /** 打开 Git Source 配置弹窗，初始化编辑数据 */
+  const openGitModal = () => {
+    setGitEditBaseUrl(gitBaseUrl);
+    setGitEditMap(Object.entries(gitSourceMap).map(([code, path]) => ({ code, path })));
+    setIsGitModalOpen(true);
+  };
+
+  /** 保存 Git Source 配置到后端 SYSTEM_SETTINGS */
+  const handleGitSave = async () => {
+    setGitSaving(true);
+    try {
+      // 过滤空行
+      const filtered = gitEditMap.filter((r) => r.code.trim() && r.path.trim());
+      const newMap: Record<string, string> = {};
+      filtered.forEach((r) => { newMap[r.code.trim()] = r.path.trim(); });
+      const baseUrl = gitEditBaseUrl.trim() || DEFAULT_GIT_BASE_URL;
+      // 并行保存 base_url 和 map
+      await Promise.all([
+        settingsAPI.update('git_source_base_url', baseUrl, 'Git Source 根地址', 'equipment'),
+        settingsAPI.update('git_source_map', JSON.stringify(newMap), 'SOURCECODE -> Git 子路径映射', 'equipment'),
+      ]);
+      setGitBaseUrl(baseUrl);
+      setGitSourceMap(newMap);
+      setIsGitModalOpen(false);
+    } catch (err) {
+      console.error('保存 Git Source 配置失败:', err);
+      alert('保存失败，请重试');
+    } finally {
+      setGitSaving(false);
+    }
   };
 
   // 获取所有机型用于筛选
@@ -207,6 +282,10 @@ export default function Equipment() {
                 <Download className="w-4 h-4" />
                 导出CSV
               </Button>
+              <Button variant="secondary" onClick={openGitModal}>
+                <Settings className="w-4 h-4" />
+                Git Source 配置
+              </Button>
             </div>
           </div>
         </Card>
@@ -253,9 +332,21 @@ export default function Equipment() {
                 filteredEquipment.map((item) => {
                   const gitUrl = buildGitUrl(item as any);
                   const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
+                  const isCopied = copiedKey === eqKey;
                   return (
                     <tr key={eqKey} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="py-3 px-3 text-sm font-medium text-cyan-600 whitespace-nowrap">{item.eq_name}</td>
+                      <td className="py-3 px-3 text-sm font-medium text-cyan-600 whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1.5">
+                          {item.eq_name}
+                          <button
+                            onClick={() => handleCopyCode(item)}
+                            title="复制机台编号"
+                            className="inline-flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:bg-cyan-50 hover:text-cyan-600 transition-colors"
+                          >
+                            {isCopied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                      </td>
                       <td className="py-3 px-3 text-sm text-gray-700 whitespace-nowrap">{item.eq_type}</td>
                       <td className="py-3 px-3 text-sm text-gray-700 whitespace-nowrap">{item.eq_model}</td>
                       <td className="py-3 px-3 text-sm text-gray-600 whitespace-nowrap">{item.area || '-'}</td>
@@ -292,15 +383,24 @@ export default function Equipment() {
                             <Github className="w-4 h-4" />
                           </a>
                         ) : (
-                          <span className="inline-block w-8 h-8 rounded-md bg-gray-50 text-gray-300 flex items-center justify-center cursor-not-allowed" title="无 SOURCECODE 或未配置映射">
+                          <span className="inline-block w-8 h-8 rounded-md bg-gray-50 text-gray-300 flex items-center justify-center cursor-not-allowed" title="无 SOURCECODE 或未配置映射，点击右上角'Git Source 配置'添加映射">
                             <Github className="w-4 h-4 opacity-40" />
                           </span>
                         )}
                       </td>
                       <td className="py-3 px-3 whitespace-nowrap text-center">
-                        <Button variant="ghost" size="sm" onClick={() => navigate(`/equipment/${encodeURIComponent(eqKey)}`)} title="查看详情">
-                          <Eye className="w-4 h-4" />
-                        </Button>
+                        <div className="inline-flex items-center gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => navigate(`/equipment/${encodeURIComponent(eqKey)}`)} title="查看详情">
+                            <Eye className="w-4 h-4" />
+                          </Button>
+                          <button
+                            onClick={() => handleViewRequirements(item)}
+                            title="查看关联需求"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
+                          >
+                            <Link2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -341,6 +441,103 @@ export default function Equipment() {
           </Card>
         </div>
       </div>
+
+      {/* Git Source 配置弹窗 */}
+      <Modal
+        isOpen={isGitModalOpen}
+        onClose={() => setIsGitModalOpen(false)}
+        title="Git Source 配置"
+      >
+        <div className="space-y-5">
+          <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-lg text-sm text-cyan-700">
+            <p className="font-medium mb-1">配置说明</p>
+            <p>SOURCECODE → Git 子路径映射，最终源码 URL = {gitEditBaseUrl || 'https://...'}<span className="text-violet-600">/[子路径]</span></p>
+            <p className="mt-1 text-xs text-cyan-600">例：base = https://github.com/foo/web/blob/main/equipment，子路径 = cpc/asm_eagle → 源码 = base/cpc/asm_eagle</p>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Git 仓库根地址</label>
+            <input
+              type="url"
+              value={gitEditBaseUrl}
+              onChange={(e) => setGitEditBaseUrl(e.target.value)}
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              placeholder="https://github.com/yourorg/yourrepo/blob/main/equipment"
+            />
+          </div>
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-gray-700">SOURCECODE 映射表</label>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setGitEditMap([...gitEditMap, { code: '', path: '' }])}
+              >
+                <Plus className="w-4 h-4" />
+                新增映射
+              </Button>
+            </div>
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {gitEditMap.length === 0 ? (
+                <p className="text-center text-sm text-gray-400 py-4">暂无映射，点击"新增映射"</p>
+              ) : (
+                gitEditMap.map((row, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={row.code}
+                      onChange={(e) => {
+                        const next = [...gitEditMap];
+                        next[idx] = { ...next[idx], code: e.target.value };
+                        setGitEditMap(next);
+                      }}
+                      className="w-24 px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 font-mono focus:outline-none focus:border-cyan-500"
+                      placeholder="如 1"
+                    />
+                    <span className="text-gray-400 text-sm">→</span>
+                    <input
+                      type="text"
+                      value={row.path}
+                      onChange={(e) => {
+                        const next = [...gitEditMap];
+                        next[idx] = { ...next[idx], path: e.target.value };
+                        setGitEditMap(next);
+                      }}
+                      className="flex-1 px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 font-mono focus:outline-none focus:border-cyan-500"
+                      placeholder="如 cpc/asm_eagle"
+                    />
+                    <button
+                      onClick={() => setGitEditMap(gitEditMap.filter((_, i) => i !== idx))}
+                      className="inline-flex items-center justify-center w-8 h-8 rounded text-red-500 hover:bg-red-50 transition-colors"
+                      title="删除该映射"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+          {gitEditBaseUrl && gitEditMap.filter((r) => r.code && r.path).length > 0 && (
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+              <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                <ExternalLink className="w-3 h-3" />
+                预览（首条映射）
+              </p>
+              <p className="text-sm font-mono text-sky-600 break-all">
+                {gitEditBaseUrl.replace(/\/$/, '')}/{gitEditMap.find((r) => r.code && r.path)?.path}
+              </p>
+            </div>
+          )}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <Button variant="ghost" onClick={() => setIsGitModalOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleGitSave} disabled={gitSaving}>
+              {gitSaving ? '保存中...' : '保存配置'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

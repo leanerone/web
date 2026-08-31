@@ -13,15 +13,13 @@ import {
   Settings,
   Users,
   Briefcase,
-  Target,
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import useAppStore from '@/stores/appStore';
 
 const menuItems = [
-  { id: 'work-dashboard', icon: Target, label: '工作仪表盘', path: '/work-dashboard' },
+  { id: 'dashboard', icon: LayoutDashboard, label: '仪表盘', path: '/dashboard' },
   { id: 'work-items', icon: Briefcase, label: '工作管理', path: '/work-items' },
-  { id: 'dashboard', icon: LayoutDashboard, label: '系统仪表盘', path: '/dashboard' },
   { id: 'projects', icon: FolderKanban, label: '项目管理', path: '/projects' },
   { id: 'equipment', icon: Cpu, label: '机台管理', path: '/equipment' },
   { id: 'requirements', icon: ClipboardList, label: '需求管理', path: '/requirements' },
