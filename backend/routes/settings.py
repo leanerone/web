@@ -8,6 +8,7 @@ from services.setting_service import (
     delete_setting,
     get_ai_settings,
     save_ai_settings,
+    test_ai_connection,
     get_notes_settings,
     save_notes_settings,
 )
@@ -53,6 +54,13 @@ def get_ai_config(db: Session = Depends(get_db)):
 def update_ai_config(settings: AISettings, db: Session = Depends(get_db)):
     save_ai_settings(db, settings)
     return {"success": True, "message": "AI配置已保存"}
+
+
+@router.post("/ai/test")
+def test_ai_config(db: Session = Depends(get_db)):
+    """用 DB 中已保存的 AI 配置发起连接测试"""
+    result = test_ai_connection(db)
+    return {"success": result.get("success", False), "data": result}
 
 
 @router.get("/notes/config")

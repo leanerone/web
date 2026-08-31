@@ -120,7 +120,6 @@ class Equipment(Base):
     srv_type        = Column("SRVTYPE", String(32))                      # 17. 服务器类型 (例: DL380 G8)
     source_code     = Column("SOURCECODE", String(32))                   # 18. 源码分类码 → Git URL 映射键
 
-    requirements = relationship("Requirement", back_populates="equipment")
     configurations = relationship("Configuration", back_populates="equipment")
 
 
@@ -146,14 +145,15 @@ class Requirement(Base):
     priority = Column(SQLAlchemyEnum(RequirementPriority), default=RequirementPriority.medium)
     status = Column(SQLAlchemyEnum(RequirementStatus), default=RequirementStatus.dev)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
-    equipment_name = Column(String(32), ForeignKey("EQUIPMENTINFO.EQUIPMENT"), nullable=True)
+    # 多机台关联: 存 JSON 数组字符串, 如 ["CATEOX-57","GATEOX-57"]
+    # (去掉单值 FK 约束, 支持按 EquipmentType/Model 多选)
+    equipment_name = Column(String(1000), nullable=True)
     notes_url = Column(String(1000), nullable=True)
     notes_doc_id = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     project = relationship("Project", back_populates="requirements")
-    equipment = relationship("Equipment", back_populates="requirements")
     change_records = relationship("ChangeRecord", back_populates="requirement")
 
 

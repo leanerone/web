@@ -65,6 +65,73 @@ def save_ai_settings(db: Session, settings: AISettings) -> None:
     set_setting(db, "ai_model", settings.ai_model, "AI Model Name", "ai")
 
 
+def test_ai_connection(db: Session) -> dict:
+    """用 DB 中保存的 AI 配置发起一次最小化测试请求, 返回连接是否可用。
+
+    失败原因分类: 缺少 api_key / openai 库未安装 / 网络/鉴权错误 / 超时
+    """
+    import time
+    ai = get_ai_settings(db)
+    if not ai.openai_api_key:
+        return {
+            "success": False,
+            "message": "未配置 API Key, 请先填写并保存 AI 配置",
+            "model": ai.ai_model,
+            "base_url": ai.openai_api_base,
+        }
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return {
+            "success": False,
+            "message": "后端未安装 openai 包 (pip install openai)",
+            "model": ai.ai_model,
+            "base_url": ai.openai_api_base,
+        }
+
+    client = OpenAI(api_key=ai.openai_api_key, base_url=ai.openai_api_base or None)
+    start = time.time()
+    try:
+        resp = client.chat.completions.create(
+            model=ai.ai_model or "gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "你是一个连接测试助手。"},
+                {"role": "user", "content": "请回复: 连接成功"},
+            ],
+            max_tokens=20,
+            temperature=0,
+            timeout=30,
+        )
+        elapsed = round(time.time() - start, 2)
+        reply = (resp.choices[0].message.content or "").strip() if resp.choices else ""
+        return {
+            "success": True,
+            "message": f"连接成功 (耗时 {elapsed}s)",
+            "model": ai.ai_model,
+            "base_url": ai.openai_api_base,
+            "reply": reply,
+            "elapsed": elapsed,
+        }
+    except Exception as e:
+        elapsed = round(time.time() - start, 2)
+        # 常见错误归类提示
+        msg = str(e)
+        hint = ""
+        if "401" in msg or "Incorrect API key" in msg or "Authentication" in msg:
+            hint = " (API Key 无效或过期, 请检查 Key 是否正确)"
+        elif "404" in msg or "model" in msg.lower() and "not found" in msg.lower():
+            hint = " (模型名不存在或无权访问, 请检查 ai_model 设置)"
+        elif "Connection" in msg or "connect" in msg.lower() or "timed out" in msg.lower():
+            hint = " (无法连接到 API Base URL, 请检查地址/网络/代理)"
+        return {
+            "success": False,
+            "message": f"请求失败 ({elapsed}s): {msg}{hint}",
+            "model": ai.ai_model,
+            "base_url": ai.openai_api_base,
+            "elapsed": elapsed,
+        }
+
+
 def get_notes_settings(db: Session) -> NotesSettings:
     return NotesSettings(
         notes_server_url=get_setting_value(db, "notes_server_url", ""),

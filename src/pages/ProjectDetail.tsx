@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
-import { 
-  ArrowLeft, 
-  Calendar, 
-  TrendingUp, 
-  CheckCircle2, 
+import {
+  ArrowLeft,
+  Calendar,
+  TrendingUp,
+  CheckCircle2,
   Clock,
-  AlertTriangle,
   Plus,
   Edit,
   Trash2,
   Target,
+  Save,
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Card from '@/components/Card';
@@ -18,20 +18,15 @@ import Modal from '@/components/Modal';
 import { projectAPI, taskAPI } from '@/services/api';
 import type { Project, Task } from '@/types';
 
-const milestones = [
-  { id: 1, title: '需求分析完成', date: '2026-01-31', completed: true },
-  { id: 2, title: '设计评审通过', date: '2026-02-28', completed: true },
-  { id: 3, title: '开发完成', date: '2026-05-15', completed: false },
-  { id: 4, title: '测试完成', date: '2026-06-15', completed: false },
-  { id: 5, title: '上线部署', date: '2026-06-30', completed: false },
-];
-
 export default function ProjectDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [project, setProject] = useState<Project | null>(null);
   const [projectTasks, setProjectTasks] = useState<Task[]>([]);
   const [isCreateTaskModalOpen, setIsCreateTaskModalOpen] = useState(false);
+  const [isEditProjectModalOpen, setIsEditProjectModalOpen] = useState(false);
+  const [editProject, setEditProject] = useState<Partial<Project>>({});
+  const [savingProject, setSavingProject] = useState(false);
   const [formData, setFormData] = useState<Partial<Task>>({ title: '', priority: 'medium' });
   const [loading, setLoading] = useState(true);
 
@@ -43,7 +38,7 @@ export default function ProjectDetail() {
         if (projectRes.success) {
           setProject(projectRes.data);
         }
-        
+
         const tasksRes = await taskAPI.list(projectId);
         if (tasksRes.success) {
           setProjectTasks(tasksRes.data);
@@ -109,12 +104,113 @@ export default function ProjectDetail() {
       });
       if (res.success) {
         setProjectTasks((prev) => [...prev, res.data]);
+        // 创建任务后刷新项目进度
+        const refreshed = await projectAPI.get(project.id);
+        if (refreshed.success) setProject(refreshed.data);
       }
     } catch (err) {
       console.error('Failed to create task:', err);
     }
     setIsCreateTaskModalOpen(false);
     setFormData({ title: '', priority: 'medium' });
+  };
+
+  // 切换任务完成状态 (checkbox)
+  const handleToggleTask = async (task: Task) => {
+    const newStatus = task.status === 'completed' ? 'pending' : 'completed';
+    // 乐观更新
+    setProjectTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t)));
+    try {
+      const res = await taskAPI.update(task.id, { status: newStatus });
+      if (!res.success) {
+        // 回滚
+        setProjectTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: task.status } : t)));
+        alert('状态更新失败');
+        return;
+      }
+      // 刷新项目进度
+      if (project) {
+        const refreshed = await projectAPI.get(project.id);
+        if (refreshed.success) setProject(refreshed.data);
+      }
+    } catch (err) {
+      console.error('Failed to toggle task:', err);
+      setProjectTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: task.status } : t)));
+    }
+  };
+
+  // 删除任务
+  const handleDeleteTask = async (taskId: number) => {
+    if (!confirm('确定删除该任务？')) return;
+    setProjectTasks((prev) => prev.filter((t) => t.id !== taskId));
+    try {
+      const res = await taskAPI.delete(taskId);
+      if (res.success) {
+        if (project) {
+          const refreshed = await projectAPI.get(project.id);
+          if (refreshed.success) setProject(refreshed.data);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to delete task:', err);
+    }
+  };
+
+  // 编辑项目: 初始化弹窗数据
+  const openEditProject = () => {
+    if (!project) return;
+    setEditProject({
+      name: project.name,
+      description: project.description,
+      status: project.status,
+      start_date: project.start_date,
+      end_date: project.end_date,
+      progress: project.progress,
+    });
+    setIsEditProjectModalOpen(true);
+  };
+
+  // 保存项目编辑
+  const handleSaveProject = async () => {
+    if (!project || !editProject.name) return;
+    setSavingProject(true);
+    try {
+      const res = await projectAPI.update(project.id, {
+        name: editProject.name,
+        description: editProject.description,
+        status: (editProject.status as Project['status']) || project.status,
+        start_date: editProject.start_date,
+        end_date: editProject.end_date,
+      });
+      if (res.success) {
+        setProject({ ...project, ...res.data });
+      } else {
+        alert('保存失败: ' + (res.message || ''));
+      }
+    } catch (err) {
+      console.error('Failed to update project:', err);
+      alert('保存失败，请重试');
+    } finally {
+      setSavingProject(false);
+    }
+    setIsEditProjectModalOpen(false);
+  };
+
+  // 删除项目
+  const handleDeleteProject = async () => {
+    if (!project) return;
+    if (!confirm(`确定删除项目"${project.name}"？此操作不可撤销，关联任务将一并删除。`)) return;
+    try {
+      const res = await projectAPI.delete(project.id);
+      if (res.success) {
+        navigate('/projects');
+      } else {
+        alert('删除失败: ' + (res.message || ''));
+      }
+    } catch (err) {
+      console.error('Failed to delete project:', err);
+      alert('删除失败，请重试');
+    }
   };
 
   const calculateTaskProgress = () => {
@@ -127,13 +223,13 @@ export default function ProjectDetail() {
     const startDate = new Date(project?.start_date || new Date());
     const endDate = new Date(project?.end_date || new Date());
     const totalDays = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24);
-    
+
     const taskStart = new Date(task.created_at);
     const taskEnd = new Date(task.due_date || project?.end_date || new Date());
-    
+
     const left = Math.max(0, ((taskStart.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) / totalDays * 100);
     const width = Math.min(100 - left, ((taskEnd.getTime() - taskStart.getTime()) / (1000 * 60 * 60 * 24)) / totalDays * 100);
-    
+
     return {
       top: `${index * 28 + 8}px`,
       left: `${left}%`,
@@ -176,11 +272,11 @@ export default function ProjectDetail() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm">
+          <Button variant="ghost" size="sm" onClick={openEditProject}>
             <Edit className="w-4 h-4" />
             编辑项目
           </Button>
-          <Button variant="danger" size="sm">
+          <Button variant="danger" size="sm" onClick={handleDeleteProject}>
             <Trash2 className="w-4 h-4" />
             删除项目
           </Button>
@@ -314,38 +410,49 @@ export default function ProjectDetail() {
           </div>
         </Card>
 
-        <Card title="里程碑">
+        <Card title="任务状态概览">
           <div className="space-y-4">
-            {milestones.map((milestone, index) => (
-              <div key={milestone.id} className="flex items-center gap-4">
-                <div className={`relative flex items-center justify-center w-10 h-10 rounded-full ${
-                  milestone.completed ? 'bg-green-500' : 'bg-gray-200'
-                }`}>
-                  {milestone.completed && (
-                    <CheckCircle2 className="w-5 h-5 text-white" />
+            {(() => {
+              const total = projectTasks.length;
+              const byStatus = {
+                completed: projectTasks.filter((t) => t.status === 'completed').length,
+                in_progress: projectTasks.filter((t) => t.status === 'in_progress').length,
+                pending: projectTasks.filter((t) => t.status === 'pending').length,
+                blocked: projectTasks.filter((t) => t.status === 'blocked').length,
+              };
+              const items = [
+                { label: '已完成', count: byStatus.completed, color: 'bg-green-500', text: 'text-green-600' },
+                { label: '进行中', count: byStatus.in_progress, color: 'bg-cyan-500', text: 'text-cyan-600' },
+                { label: '待处理', count: byStatus.pending, color: 'bg-gray-400', text: 'text-gray-500' },
+                { label: '阻塞', count: byStatus.blocked, color: 'bg-red-500', text: 'text-red-600' },
+              ];
+              return (
+                <>
+                  {items.map((it) => (
+                    <div key={it.label} className="flex items-center gap-4">
+                      <div className={`w-3 h-3 rounded-full ${it.color}`} />
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="font-medium text-gray-700">{it.label}</p>
+                          <span className={`text-sm font-semibold ${it.text}`}>
+                            {it.count} 个 {total > 0 ? `(${Math.round((it.count / total) * 100)}%)` : ''}
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full ${it.color} transition-all duration-500`}
+                            style={{ width: `${total > 0 ? (it.count / total) * 100 : 0}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {total === 0 && (
+                    <p className="text-center text-sm text-gray-400 py-2">暂无任务，点击右上方"添加任务"开始</p>
                   )}
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <p className={`font-medium ${milestone.completed ? 'text-gray-800' : 'text-gray-600'}`}>
-                      {milestone.title}
-                    </p>
-                    <span className={`text-sm ${milestone.completed ? 'text-green-600' : 'text-gray-500'}`}>
-                      {milestone.date}
-                    </span>
-                  </div>
-                  <div className="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full ${milestone.completed ? 'bg-green-500' : 'bg-gray-300'}`}
-                      style={{ width: `${((index + 1) / milestones.length) * 100}%` }}
-                    />
-                  </div>
-                </div>
-                {!milestone.completed && (
-                  <AlertTriangle className="w-5 h-5 text-orange-500" />
-                )}
-              </div>
-            ))}
+                </>
+              );
+            })()}
           </div>
         </Card>
       </div>
@@ -387,11 +494,12 @@ export default function ProjectDetail() {
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <button 
-                      onClick={() => {}}
+                    <button
+                      onClick={() => handleToggleTask(task)}
+                      title={task.status === 'completed' ? '标记为待处理' : '标记为已完成'}
                       className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                        task.status === 'completed' 
-                          ? 'bg-green-500 border-green-500' 
+                        task.status === 'completed'
+                          ? 'bg-green-500 border-green-500'
                           : 'border-gray-300 hover:border-cyan-500'
                       }`}
                     >
@@ -425,6 +533,13 @@ export default function ProjectDetail() {
                         {task.due_date}
                       </div>
                     )}
+                    <button
+                      onClick={() => handleDeleteTask(task.id)}
+                      title="删除任务"
+                      className="inline-flex items-center justify-center w-7 h-7 rounded text-red-500 hover:bg-red-50 transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
               </div>
@@ -467,7 +582,7 @@ export default function ProjectDetail() {
               <label className="block text-sm font-medium text-gray-700 mb-1">优先级</label>
               <select
                 value={formData.priority}
-                onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, priority: e.target.value as Task['priority'] })}
                 className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
               >
                 <option value="low">低</option>
@@ -492,6 +607,86 @@ export default function ProjectDetail() {
             </Button>
             <Button onClick={handleCreateTask} disabled={!formData.title}>
               添加任务
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* 编辑项目弹窗 */}
+      <Modal
+        isOpen={isEditProjectModalOpen}
+        onClose={() => setIsEditProjectModalOpen(false)}
+        title="编辑项目"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">项目名称 *</label>
+            <input
+              type="text"
+              value={editProject.name || ''}
+              onChange={(e) => setEditProject({ ...editProject, name: e.target.value })}
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              placeholder="项目名称"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">项目描述</label>
+            <textarea
+              value={editProject.description || ''}
+              onChange={(e) => setEditProject({ ...editProject, description: e.target.value })}
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500 resize-none"
+              rows={3}
+              placeholder="项目描述..."
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">项目状态</label>
+              <select
+                value={editProject.status || 'active'}
+                onChange={(e) => setEditProject({ ...editProject, status: e.target.value as Project['status'] })}
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              >
+                <option value="active">进行中</option>
+                <option value="paused">已暂停</option>
+                <option value="completed">已完成</option>
+                <option value="cancelled">已取消</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">当前进度</label>
+              <div className="px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-700">
+                {editProject.progress ?? 0}% <span className="text-xs text-gray-400">(由任务自动计算)</span>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">开始日期</label>
+              <input
+                type="date"
+                value={editProject.start_date || ''}
+                onChange={(e) => setEditProject({ ...editProject, start_date: e.target.value })}
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">结束日期</label>
+              <input
+                type="date"
+                value={editProject.end_date || ''}
+                onChange={(e) => setEditProject({ ...editProject, end_date: e.target.value })}
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-3 pt-4">
+            <Button variant="ghost" onClick={() => setIsEditProjectModalOpen(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSaveProject} disabled={savingProject || !editProject.name}>
+              <Save className="w-4 h-4" />
+              {savingProject ? '保存中...' : '保存'}
             </Button>
           </div>
         </div>

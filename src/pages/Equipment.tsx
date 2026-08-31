@@ -27,14 +27,32 @@ import type { Equipment } from '@/types';
 const mockEquipment: Equipment[] = [];
 
 // 默认 Git Source 映射 (后端 SYSTEM_SETTINGS 未加载成功时的 fallback)
+// key = "equipment_type|equipment_model" (按机台类型+型号区分源码, 不再用 SOURCECODE)
 const DEFAULT_GIT_BASE_URL = 'https://github.com/leanerone/web/blob/main/equipment';
 const DEFAULT_GIT_SOURCE_MAP: Record<string, string> = {
-  '1': 'cpc/asm_eagle',
-  '2': 'pecvd/asm_trident',
-  '3': 'gateox/tel_8280',
-  '4': 'tteox/thermawave_op5205t',
-  '5': 'cateox/asml_8350',
+  'CPC|ASM-8350V-LPT': 'cpc/asm_eagle',
+  'PECVD|ASM-Trident': 'pecvd/asm_trident',
+  'GATEOX|TEL-82800S': 'gateox/tel_8280',
+  'TTOX|Thermawave-OP5205T': 'tteox/thermawave_op5205t',
+  'CATEOX|ASML-PAS5500': 'cateox/asml_8350',
 };
+
+// SOURCECODE 产线含义 (0=通用, 1=LINE1, 2=LINE2)
+function getSourceLineLabel(code?: string): string {
+  switch (String(code ?? '').trim()) {
+    case '0': return '通用';
+    case '1': return 'LINE1';
+    case '2': return 'LINE2';
+    default: return '';
+  }
+}
+
+// 构造 Git Source 映射 key: "equipment_type|equipment_model"
+function buildGitSourceKey(item: Equipment): string {
+  const t = String((item as any).equipment_type ?? item.eq_type ?? '').trim();
+  const m = String((item as any).equipment_model ?? item.eq_model ?? '').trim();
+  return `${t}|${m}`;
+}
 
 export default function Equipment() {
   const navigate = useNavigate();
@@ -110,11 +128,11 @@ export default function Equipment() {
     link.click();
   };
 
-  /** 根据 SOURCECODE 拼接 Git URL */
+  /** 根据 equipment_type + equipment_model 拼接 Git URL */
   const buildGitUrl = (item: Equipment): string => {
-    const sc = String((item as any).source_code ?? '').trim();
-    if (!sc) return '';
-    const sub = gitSourceMap[sc];
+    const key = buildGitSourceKey(item);
+    if (!key || key === '|') return '';
+    const sub = gitSourceMap[key];
     if (!sub) return '';
     return `${gitBaseUrl.replace(/\/$/, '')}/${sub}`;
   };
@@ -166,7 +184,7 @@ export default function Equipment() {
       // 并行保存 base_url 和 map
       await Promise.all([
         settingsAPI.update('git_source_base_url', baseUrl, 'Git Source 根地址', 'equipment'),
-        settingsAPI.update('git_source_map', JSON.stringify(newMap), 'SOURCECODE -> Git 子路径映射', 'equipment'),
+        settingsAPI.update('git_source_map', JSON.stringify(newMap), 'EquipmentType|Model -> Git 子路径映射', 'equipment'),
       ]);
       setGitBaseUrl(baseUrl);
       setGitSourceMap(newMap);
@@ -357,8 +375,10 @@ export default function Equipment() {
                       <td className="py-3 px-3 text-sm text-gray-600 whitespace-nowrap">{item.driver_type || '-'}</td>
                       <td className="py-3 px-3 text-sm whitespace-nowrap">
                         {(item as any).source_code ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-violet-50 text-violet-700 border border-violet-100">
-                            SOURCE={(item as any).source_code}
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-violet-50 text-violet-700 border border-violet-100" title={`SOURCECODE=${(item as any).source_code} (产线区分)`}>
+                            <span className="font-mono">{(item as any).source_code}</span>
+                            <span className="text-violet-400">·</span>
+                            <span>{getSourceLineLabel((item as any).source_code)}</span>
                           </span>
                         ) : (
                           <span className="text-gray-300">-</span>
@@ -383,7 +403,7 @@ export default function Equipment() {
                             <Github className="w-4 h-4" />
                           </a>
                         ) : (
-                          <span className="inline-block w-8 h-8 rounded-md bg-gray-50 text-gray-300 flex items-center justify-center cursor-not-allowed" title="无 SOURCECODE 或未配置映射，点击右上角'Git Source 配置'添加映射">
+                          <span className="inline-block w-8 h-8 rounded-md bg-gray-50 text-gray-300 flex items-center justify-center cursor-not-allowed" title="该机台 Type|Model 未配置 Git 子路径映射，点击右上角'Git Source 配置'添加">
                             <Github className="w-4 h-4 opacity-40" />
                           </span>
                         )}
@@ -434,8 +454,8 @@ export default function Equipment() {
                 <p className="text-sm text-gray-600 mt-1">机型数</p>
               </div>
               <div className="p-4 bg-violet-50 rounded-lg text-center">
-                <p className="text-2xl font-bold text-violet-600">{equipmentList.filter(e => (e as any).source_code).length}</p>
-                <p className="text-sm text-gray-600 mt-1">有源码映射</p>
+                <p className="text-2xl font-bold text-violet-600">{equipmentList.filter((e) => buildGitUrl(e)).length}</p>
+                <p className="text-sm text-gray-600 mt-1">有 Git 源码</p>
               </div>
             </div>
           </Card>
@@ -451,8 +471,8 @@ export default function Equipment() {
         <div className="space-y-5">
           <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-lg text-sm text-cyan-700">
             <p className="font-medium mb-1">配置说明</p>
-            <p>SOURCECODE → Git 子路径映射，最终源码 URL = {gitEditBaseUrl || 'https://...'}<span className="text-violet-600">/[子路径]</span></p>
-            <p className="mt-1 text-xs text-cyan-600">例：base = https://github.com/foo/web/blob/main/equipment，子路径 = cpc/asm_eagle → 源码 = base/cpc/asm_eagle</p>
+            <p>按 <b>EquipmentType | EquipmentModel</b> 区分源码，最终源码 URL = {gitEditBaseUrl || 'https://...'}<span className="text-violet-600">/[子路径]</span></p>
+            <p className="mt-1 text-xs text-cyan-600">SOURCECODE 字段保留 0/1/2 产线区分功能不变。例：key = CPC|ASM-8350V-LPT，子路径 = cpc/asm_eagle</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Git 仓库根地址</label>
@@ -466,19 +486,40 @@ export default function Equipment() {
           </div>
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700">SOURCECODE 映射表</label>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setGitEditMap([...gitEditMap, { code: '', path: '' }])}
-              >
-                <Plus className="w-4 h-4" />
-                新增映射
-              </Button>
+              <label className="block text-sm font-medium text-gray-700">Type|Model 映射表</label>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    // 从机台数据去重 type+model, 合并已有映射的 path
+                    const existing = new Map(gitEditMap.map((r) => [r.code, r.path]));
+                    const keys = new Set<string>();
+                    equipmentList.forEach((eq) => {
+                      const k = buildGitSourceKey(eq);
+                      if (k && k !== '|') keys.add(k);
+                    });
+                    const next = Array.from(keys).map((k) => ({ code: k, path: existing.get(k) || '' }));
+                    setGitEditMap(next);
+                  }}
+                  title="扫描机台数据, 按 EquipmentType+Model 去重生成映射行(保留已填路径)"
+                >
+                  <Database className="w-4 h-4" />
+                  从机台填充
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setGitEditMap([...gitEditMap, { code: '', path: '' }])}
+                >
+                  <Plus className="w-4 h-4" />
+                  新增
+                </Button>
+              </div>
             </div>
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {gitEditMap.length === 0 ? (
-                <p className="text-center text-sm text-gray-400 py-4">暂无映射，点击"新增映射"</p>
+                <p className="text-center text-sm text-gray-400 py-4">暂无映射，点击"从机台填充"自动生成或"新增"手动添加</p>
               ) : (
                 gitEditMap.map((row, idx) => (
                   <div key={idx} className="flex items-center gap-2">
@@ -490,8 +531,8 @@ export default function Equipment() {
                         next[idx] = { ...next[idx], code: e.target.value };
                         setGitEditMap(next);
                       }}
-                      className="w-24 px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 font-mono focus:outline-none focus:border-cyan-500"
-                      placeholder="如 1"
+                      className="w-52 px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 font-mono focus:outline-none focus:border-cyan-500"
+                      placeholder="EquipmentType|EquipmentModel"
                     />
                     <span className="text-gray-400 text-sm">→</span>
                     <input

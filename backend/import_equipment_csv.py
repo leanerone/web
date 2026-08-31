@@ -35,6 +35,8 @@ CSV 列名支持 (自动识别, 大小写不敏感):
 """
 import sys
 import csv
+import json
+import os
 import argparse
 from database.session import SessionLocal, engine
 from database.models import Equipment
@@ -146,6 +148,54 @@ def import_csv(csv_path: str, replace: bool = False):
         print(f"导入完成: 新增 {inserted} | 跳过 {skipped}")
         total = db.query(Equipment).count()
         print(f"EQUIPMENTINFO 表当前共 {total} 条机台数据")
+
+        # 生成 Git Source 分组映射表: 按 (equipment_type, equipment_model) 去重并编号
+        # 说明: SOURCECODE 字段保留 0/1/2 产线区分含义不变;
+        #       Git 源码按 EquipmentType+Model 区分, 这里生成编号表供参考,
+        #       前端 Git Source 配置的映射 key 实际使用 "equipment_type|equipment_model" 字符串.
+        print("=" * 60)
+        print("Git Source 分组表 (按 EquipmentType + EquipmentModel 区分)")
+        print("=" * 60)
+        all_rows = db.query(Equipment).all()
+        groups: dict[str, dict] = {}  # key "type|model" -> {type, model, count, source_codes}
+        for eq in all_rows:
+            t = (eq.equipment_type or "").strip()
+            m = (eq.equipment_model or "").strip()
+            if not t and not m:
+                continue
+            key = f"{t}|{m}"
+            if key not in groups:
+                groups[key] = {"type": t, "model": m, "count": 0, "source_codes": set()}
+            groups[key]["count"] += 1
+            sc = (eq.source_code or "").strip()
+            if sc:
+                groups[key]["source_codes"].add(sc)
+
+        # 按数量降序排序后分配编号 (1, 2, 3, ...)
+        sorted_groups = sorted(groups.items(), key=lambda kv: (-kv[1]["count"], kv[0]))
+        print(f"{'编号':<6}{'EquipmentType':<20}{'EquipmentModel':<30}{'数量':<8}{'SOURCECODE'}")
+        print("-" * 90)
+        source_group_map = {}
+        for idx, (key, info) in enumerate(sorted_groups, start=1):
+            sc_str = "/".join(sorted(info["source_codes"])) if info["source_codes"] else "-"
+            print(f"{idx:<6}{info['type']:<20}{info['model']:<30}{info['count']:<8}{sc_str}")
+            source_group_map[str(idx)] = {
+                "key": key,
+                "equipment_type": info["type"],
+                "equipment_model": info["model"],
+                "count": info["count"],
+                "source_codes": sorted(info["source_codes"]),
+            }
+
+        # 写入 source_group_map.json 供前端 Git Source 配置参考
+        out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "source_group_map.json")
+        with open(out_path, "w", encoding="utf-8") as jf:
+            json.dump(source_group_map, jf, ensure_ascii=False, indent=2)
+        print("-" * 90)
+        print(f"共 {len(source_group_map)} 种 EquipmentType+Model 组合")
+        print(f"映射表已写入: {out_path}")
+        print("提示: 前端 Git Source 配置的 key 使用 'EquipmentType|EquipmentModel' 字符串,")
+        print("      可点击配置弹窗内'从机台填充'按钮自动生成映射行, 再为每行填入 Git 子路径即可。")
 
     except FileNotFoundError:
         print(f"错误: 文件不存在 {csv_path}")

@@ -92,7 +92,14 @@ export default function Requirements() {
       req.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesPriority = priorityFilter === 'all' || req.priority === priorityFilter;
     const matchesStatus = statusFilter === 'all' || req.status === statusFilter;
-    const matchesEquipment = equipmentFilter === 'all' || req.equipment_name === equipmentFilter;
+    const matchesEquipment = equipmentFilter === 'all' || (() => {
+      if (!req.equipment_name) return false;
+      try {
+        const arr = JSON.parse(req.equipment_name);
+        if (Array.isArray(arr)) return arr.includes(equipmentFilter);
+      } catch {}
+      return req.equipment_name === equipmentFilter;
+    })();
     return matchesSearch && matchesPriority && matchesStatus && matchesEquipment;
   });
 
@@ -179,10 +186,24 @@ export default function Requirements() {
     return labels[status] || status;
   };
 
+  // 解析 equipment_name (JSON 数组字符串) 为机台名称展示文本, 兼容旧单值
   const getEquipmentName = (equipmentName?: string) => {
     if (!equipmentName) return '未关联';
-    const eq = equipment.find((e) => (e.equipment ?? String(e.id)) === equipmentName);
-    return eq ? (eq.eq_name || eq.equipment || '未知机台') : equipmentName;
+    let names: string[] = [];
+    try {
+      const arr = JSON.parse(equipmentName);
+      if (Array.isArray(arr)) names = arr.map(String);
+      else names = [equipmentName];
+    } catch {
+      names = [equipmentName];
+    }
+    if (names.length === 0) return '未关联';
+    const labels = names.map((n) => {
+      const eq = equipment.find((e) => (e.equipment ?? String(e.id)) === n);
+      return eq ? (eq.eq_name || eq.equipment || n) : n;
+    });
+    const txt = labels.join(', ');
+    return labels.length > 1 ? `${txt} 等${labels.length}台` : txt;
   };
 
   const statusOrder = { dev: 0, testing: 1, deploying: 2, completed: 3 };

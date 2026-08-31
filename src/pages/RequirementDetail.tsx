@@ -34,17 +34,35 @@ const statusFlow = [
   { status: 'completed', label: '已完成', icon: CheckCircle2 },
 ];
 
+// 解析 equipment_name (JSON 数组字符串) 为机台编号数组, 兼容旧单值字符串
+function parseEquipmentNames(raw?: string): string[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) return arr.map((x) => String(x)).filter(Boolean);
+  } catch { /* 旧单值: 直接当数组 */ }
+  return [raw];
+}
+
+// 机台类型/型号去重列表 (用于编辑弹窗筛选)
+function uniqueValues(list: Equipment[], key: 'eq_type' | 'eq_model'): string[] {
+  return [...new Set(list.map((e) => e[key]).filter(Boolean))] as string[];
+}
+
 export default function RequirementDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [requirement, setRequirement] = useState<Requirement | null>(null);
-  const [equipment, setEquipment] = useState<Equipment | null>(null);
   const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [changeRecords, setChangeRecords] = useState<ChangeRecord[]>([]);
   const [isChangeModalOpen, setIsChangeModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [formData, setFormData] = useState<Partial<ChangeRecord>>({ change_type: '', description: '' });
   const [editData, setEditData] = useState<Partial<Requirement>>({});
+  // 编辑弹窗: 多选机台 + 类型/型号筛选
+  const [editEquipmentNames, setEditEquipmentNames] = useState<string[]>([]);
+  const [eqTypeFilter, setEqTypeFilter] = useState<string>('');
+  const [eqModelFilter, setEqModelFilter] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -62,7 +80,6 @@ export default function RequirementDetail() {
             setRequirement(found);
             if (equipRes.success) {
               setEquipmentList(equipRes.data);
-              setEquipment(equipRes.data.find((e: Equipment) => (e.equipment ?? String(e.id)) === found.equipment_name) || null);
             }
             setChangeRecords(mockChangeRecords.filter((c) => c.requirement_id === requirementId));
           }
@@ -140,20 +157,19 @@ export default function RequirementDetail() {
     if (!requirement || !editData.title) return;
     setSaving(true);
     try {
+      // 多机台: 序列化为 JSON 数组字符串
+      const equipmentNameJson = editEquipmentNames.length > 0 ? JSON.stringify(editEquipmentNames) : null;
       const updateData: Partial<Requirement> = {
         title: editData.title,
         description: editData.description ?? requirement.description,
         priority: (editData.priority as Requirement['priority']) ?? requirement.priority,
         status: (editData.status as Requirement['status']) ?? requirement.status,
-        equipment_name: editData.equipment_name ?? requirement.equipment_name,
+        equipment_name: equipmentNameJson ?? undefined,
         notes_url: editData.notes_url ?? requirement.notes_url,
       };
       const res = await requirementAPI.update(requirement.id, updateData);
       if (res.success) {
         setRequirement({ ...requirement, ...updateData, updated_at: new Date().toISOString() });
-        if (editData.equipment_name !== requirement.equipment_name) {
-          setEquipment(equipmentList.find((e) => (e.equipment ?? String(e.id)) === editData.equipment_name) || null);
-        }
       } else {
         alert('保存失败: ' + (res.message || '未知错误'));
       }
@@ -257,9 +273,11 @@ export default function RequirementDetail() {
               description: requirement.description,
               priority: requirement.priority,
               status: requirement.status,
-              equipment_name: requirement.equipment_name,
               notes_url: requirement.notes_url,
             });
+            setEditEquipmentNames(parseEquipmentNames(requirement.equipment_name));
+            setEqTypeFilter('');
+            setEqModelFilter('');
             setIsEditModalOpen(true);
           }}>
             <Edit className="w-4 h-4" />
@@ -415,51 +433,47 @@ export default function RequirementDetail() {
             </div>
           </Card>
 
-          {equipment && (
-            <Card title="关联机台">
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-cyan-50 flex items-center justify-center">
-                    <Cpu className="w-5 h-5 text-cyan-600" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-800">{equipment.eq_name}</p>
-                    <p className="text-sm text-gray-500">{equipment.eq_type} - {equipment.eq_model}</p>
-                  </div>
+          {(() => {
+            const names = parseEquipmentNames(requirement.equipment_name);
+            if (names.length === 0) return null;
+            const linked = names.map((n) => equipmentList.find((e) => (e.equipment ?? String(e.id)) === n)).filter(Boolean) as Equipment[];
+            return (
+              <Card title={`关联机台 (共 ${linked.length} 台)`}>
+                <div className="space-y-3">
+                  {linked.length === 0 ? (
+                    <p className="text-sm text-gray-500">关联的机台不在当前列表中: {names.join(', ')}</p>
+                  ) : (
+                    linked.map((eq) => (
+                      <div key={String(eq.equipment ?? eq.id)} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-lg bg-cyan-50 flex items-center justify-center">
+                            <Cpu className="w-4 h-4 text-cyan-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-800 truncate">{eq.eq_name}</p>
+                            <p className="text-xs text-gray-500 truncate">{eq.eq_type} - {eq.eq_model}</p>
+                          </div>
+                          <button
+                            onClick={() => navigate(`/equipment/${encodeURIComponent(String(eq.equipment ?? eq.id ?? eq.eq_name))}`)}
+                            className="inline-flex items-center justify-center w-8 h-8 rounded text-cyan-600 hover:bg-cyan-50 transition-colors"
+                            title="查看机台详情"
+                          >
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                        <div className="mt-2 pt-2 border-t border-gray-200 grid grid-cols-2 gap-1 text-xs">
+                          <div className="flex justify-between"><span className="text-gray-500">AP</span><span className="text-gray-700">{eq.ap_name || '-'}</span></div>
+                          <div className="flex justify-between"><span className="text-gray-500">区域</span><span className="text-gray-700">{eq.area || '-'}</span></div>
+                          <div className="flex justify-between"><span className="text-gray-500">厂商</span><span className="text-gray-700">{eq.vendor || '-'}</span></div>
+                          <div className="flex justify-between"><span className="text-gray-500">驱动</span><span className="text-gray-700">{eq.driver_version || '-'}</span></div>
+                        </div>
+                      </div>
+                    ))
+                  )}
                 </div>
-                <div className="border-t border-gray-200 pt-4 space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">AP_ID</span>
-                    <span className="text-gray-700">{equipment.ap_id}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">AP_NAME</span>
-                    <span className="text-gray-700">{equipment.ap_name}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">VENDOR</span>
-                    <span className="text-gray-700">{equipment.vendor}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">DRIVER_VER</span>
-                    <span className="text-gray-700">{equipment.driver_version}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">AREA</span>
-                    <span className="text-gray-700">{equipment.area}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-500">LOCATION</span>
-                    <span className="text-gray-700">{equipment.location}</span>
-                  </div>
-                </div>
-                <Button variant="ghost" className="w-full" onClick={() => navigate(`/equipment/${encodeURIComponent(equipment.equipment ?? equipment.id ?? equipment.eq_name)}`)}>
-                  <ChevronRight className="w-4 h-4" />
-                  查看机台详情
-                </Button>
-              </div>
-            </Card>
-          )}
+              </Card>
+            );
+          })()}
 
           <Card title="操作历史">
             <div className="space-y-3">
@@ -595,20 +609,69 @@ export default function RequirementDetail() {
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">关联机台</label>
-            <select
-              value={editData.equipment_name || ''}
-              onChange={(e) => setEditData({ ...editData, equipment_name: e.target.value || undefined })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-            >
-              <option value="">不关联机台</option>
-              {equipmentList.map((eq) => (
-                <option key={eq.equipment ?? String(eq.id)} value={eq.equipment ?? String(eq.id)}>
-                  {eq.eq_name || eq.equipment || `机台 #${eq.id}`}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-gray-500 mt-1">选择上线机台，方便记录哪个机台需要上线</p>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-gray-700">关联机台 (可多选)</label>
+              <span className="text-xs text-cyan-600">已选 {editEquipmentNames.length} 台</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <select
+                value={eqTypeFilter}
+                onChange={(e) => setEqTypeFilter(e.target.value)}
+                className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500"
+              >
+                <option value="">全部类型</option>
+                {uniqueValues(equipmentList, 'eq_type').map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <select
+                value={eqModelFilter}
+                onChange={(e) => setEqModelFilter(e.target.value)}
+                className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500"
+              >
+                <option value="">全部型号</option>
+                {uniqueValues(equipmentList, 'eq_model').map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+            <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-gray-50">
+              {equipmentList
+                .filter((eq) => !eqTypeFilter || eq.eq_type === eqTypeFilter)
+                .filter((eq) => !eqModelFilter || eq.eq_model === eqModelFilter)
+                .map((eq) => {
+                  const eqKey = String(eq.equipment ?? eq.id);
+                  const checked = editEquipmentNames.includes(eqKey);
+                  return (
+                    <label
+                      key={eqKey}
+                      className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-cyan-50 border-b border-gray-100 last:border-b-0 ${checked ? 'bg-cyan-50' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setEditEquipmentNames([...editEquipmentNames, eqKey]);
+                          } else {
+                            setEditEquipmentNames(editEquipmentNames.filter((n) => n !== eqKey));
+                          }
+                        }}
+                        className="w-4 h-4 text-cyan-600 rounded focus:ring-cyan-500"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{eq.eq_name || eq.equipment || `机台 #${eq.id}`}</p>
+                        <p className="text-xs text-gray-500 truncate">{eq.eq_type} - {eq.eq_model}</p>
+                      </div>
+                      <span className="text-xs text-gray-400">{eq.area}</span>
+                    </label>
+                  );
+                })}
+              {equipmentList.filter((eq) => !eqTypeFilter || eq.eq_type === eqTypeFilter).filter((eq) => !eqModelFilter || eq.eq_model === eqModelFilter).length === 0 && (
+                <p className="text-center text-sm text-gray-400 py-4">无匹配机台</p>
+              )}
+            </div>
+            <p className="text-xs text-gray-500 mt-1">可按 EquipmentType / EquipmentModel 筛选后勾选多个上线机台</p>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">需求描述</label>

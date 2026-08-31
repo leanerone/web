@@ -245,6 +245,9 @@ export const settingsAPI = {
   
   saveAISettings: (data: AISettings): Promise<APIResponse<void>> =>
     api.post('/settings/ai/config', data),
+
+  testAIConnection: (): Promise<APIResponse<{ success: boolean; message: string; model?: string; base_url?: string; reply?: string; elapsed?: number }>> =>
+    api.post('/settings/ai/test'),
   
   getNotesSettings: (): Promise<APIResponse<NotesSettings>> =>
     api.get('/settings/notes/config'),

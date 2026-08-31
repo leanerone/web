@@ -14,7 +14,8 @@ def get_requirements(db: Session, keyword: str = None, status: str = None, prior
     if project_id:
         query = query.filter(Requirement.project_id == project_id)
     if equipment_name:
-        query = query.filter(Requirement.equipment_name == equipment_name)
+        # equipment_name 存 JSON 数组字符串, 用 contains 做"包含某机台"匹配
+        query = query.filter(Requirement.equipment_name.contains(equipment_name))
     total = query.count()
     requirements = query.order_by(Requirement.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
     return requirements, total

@@ -3,10 +3,10 @@ import {
   Settings,
   Bot,
   Database,
-  Bell,
   Save,
   RefreshCw,
   CheckCircle2,
+  AlertTriangle,
   Key,
   Globe,
 } from 'lucide-react';
@@ -19,6 +19,9 @@ export default function SystemSettings() {
   const [activeTab, setActiveTab] = useState<'ai' | 'notes' | 'general'>('ai');
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  // AI 连接测试状态
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string; reply?: string; model?: string; elapsed?: number } | null>(null);
 
   const [aiSettings, setAiSettings] = useState<AISettings>({
     openai_api_key: '',
@@ -85,7 +88,32 @@ export default function SystemSettings() {
   };
 
   const handleTestConnection = async () => {
-    alert('连接测试功能开发中...');
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await settingsAPI.testAIConnection();
+      if (res.success && res.data) {
+        setTestResult({
+          success: res.data.success,
+          message: res.data.message,
+          reply: res.data.reply,
+          model: res.data.model,
+          elapsed: res.data.elapsed,
+        });
+      } else {
+        setTestResult({
+          success: false,
+          message: res.message || '测试请求失败，请检查后端服务是否运行',
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err?.response?.data?.detail || err?.message || '测试请求异常，请检查后端服务和网络',
+      });
+    } finally {
+      setTesting(false);
+    }
   };
 
   const tabs = [
@@ -222,10 +250,35 @@ export default function SystemSettings() {
                 </div>
 
                 <div className="pt-4">
-                  <Button variant="secondary" onClick={handleTestConnection}>
+                  <Button variant="secondary" onClick={handleTestConnection} loading={testing}>
                     <RefreshCw className="w-4 h-4" />
-                    测试连接
+                    {testing ? '测试中...' : '测试连接'}
                   </Button>
+                  {testResult && (
+                    <div className={`mt-3 p-3 rounded-lg border text-sm ${
+                      testResult.success
+                        ? 'bg-green-50 border-green-200 text-green-700'
+                        : 'bg-red-50 border-red-200 text-red-700'
+                    }`}>
+                      <div className="flex items-start gap-2">
+                        {testResult.success ? (
+                          <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium">{testResult.success ? '连接成功' : '连接失败'}</p>
+                          <p className="text-xs mt-1 break-words">{testResult.message}</p>
+                          {testResult.reply && (
+                            <p className="text-xs mt-1 text-gray-500">模型回复: {testResult.reply}</p>
+                          )}
+                          {testResult.model && (
+                            <p className="text-xs mt-0.5 text-gray-400">模型: {testResult.model}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </Card>
