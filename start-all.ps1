@@ -1,78 +1,81 @@
-# CIM Work Manager - 一键启动脚本
-# 用法: 右键 -> 使用 PowerShell 运行
+# CIM Work Manager - One-Click Start Script
+# Usage: Right-click -> Run with PowerShell
 
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "  CIM Work Manager 一键启动脚本" -ForegroundColor Cyan
-Write-Host "========================================`n" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  CIM Work Manager - Start All" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $BackendDir = Join-Path $ProjectRoot "backend"
 $FrontendDir = $ProjectRoot
 
-Write-Host "项目根目录: $ProjectRoot" -ForegroundColor Yellow
+Write-Host "Project Root: $ProjectRoot" -ForegroundColor Yellow
 
-# 1. 检查 Python
+# 1. Check Python
 $pythonCmd = $null
 foreach ($cmd in @("python", "py", "python3")) {
     try {
         $version = & $cmd --version 2>&1
         if ($LASTEXITCODE -eq 0) {
             $pythonCmd = $cmd
-            Write-Host "[OK] 找到 Python: $cmd ($version)" -ForegroundColor Green
+            Write-Host "[OK] Python found: $cmd ($version)" -ForegroundColor Green
             break
         }
     } catch {}
 }
 
 if (-not $pythonCmd) {
-    Write-Host "[ERROR] 未找到 Python，请先安装 Python 3.8+" -ForegroundColor Red
-    Write-Host "  下载地址: https://www.python.org/downloads/" -ForegroundColor Red
-    Read-Host "按回车退出"
+    Write-Host "[ERROR] Python not found. Please install Python 3.8+" -ForegroundColor Red
+    Write-Host "  Download: https://www.python.org/downloads/" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
-# 2. 检查 Node.js
+# 2. Check Node.js
 $nodeCmd = $null
-$npmCmd = $null
 foreach ($cmd in @("node")) {
     try {
         $version = & $cmd --version 2>&1
         if ($LASTEXITCODE -eq 0) {
             $nodeCmd = $cmd
-            Write-Host "[OK] 找到 Node.js: $cmd ($version)" -ForegroundColor Green
+            Write-Host "[OK] Node.js found: $cmd ($version)" -ForegroundColor Green
             break
         }
     } catch {}
 }
 
 if (-not $nodeCmd) {
-    Write-Host "[ERROR] 未找到 Node.js，请先安装 Node.js 18+" -ForegroundColor Red
-    Write-Host "  下载地址: https://nodejs.org/" -ForegroundColor Red
-    Read-Host "按回车退出"
+    Write-Host "[ERROR] Node.js not found. Please install Node.js 18+" -ForegroundColor Red
+    Write-Host "  Download: https://nodejs.org/" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
-# 检查 npm
+# Check npm
+$npmCmd = $null
 try {
     $npmVersion = & npm --version 2>&1
     if ($LASTEXITCODE -eq 0) {
         $npmCmd = "npm"
-        Write-Host "[OK] 找到 npm: $npmVersion" -ForegroundColor Green
+        Write-Host "[OK] npm found: $npmVersion" -ForegroundColor Green
     }
 } catch {
-    Write-Host "[ERROR] 未找到 npm" -ForegroundColor Red
-    Read-Host "按回车退出"
+    Write-Host "[ERROR] npm not found" -ForegroundColor Red
+    Read-Host "Press Enter to exit"
     exit 1
 }
 
-# 3. 检查后端虚拟环境和依赖
+# 3. Check backend venv and dependencies
 $venvPath = Join-Path $BackendDir "venv"
 $requirementsFile = Join-Path $BackendDir "requirements.txt"
 
 if (Test-Path $requirementsFile) {
-    Write-Host "`n[1/4] 检查后端依赖..." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "[1/4] Checking backend dependencies..." -ForegroundColor Yellow
     if (-not (Test-Path $venvPath)) {
-        Write-Host "  创建 Python 虚拟环境..." -ForegroundColor Cyan
+        Write-Host "  Creating Python virtual environment..." -ForegroundColor Cyan
         Push-Location $BackendDir
         & $pythonCmd -m venv venv
         Pop-Location
@@ -84,33 +87,36 @@ if (Test-Path $requirementsFile) {
     }
 
     if (Test-Path $pipCmd) {
-        Write-Host "  安装/更新后端依赖..." -ForegroundColor Cyan
+        Write-Host "  Installing/updating backend dependencies..." -ForegroundColor Cyan
         & $pipCmd install -r $requirementsFile -q
-        Write-Host "  [OK] 后端依赖已就绪" -ForegroundColor Green
+        Write-Host "  [OK] Backend dependencies ready" -ForegroundColor Green
     }
 }
 
-# 4. 检查前端依赖
+# 4. Check frontend dependencies
 $nodeModules = Join-Path $FrontendDir "node_modules"
 if (-not (Test-Path $nodeModules)) {
-    Write-Host "`n[2/4] 安装前端依赖..." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "[2/4] Installing frontend dependencies..." -ForegroundColor Yellow
     Push-Location $FrontendDir
     & npm install
     Pop-Location
     if (-not (Test-Path $nodeModules)) {
-        Write-Host "[ERROR] 前端依赖安装失败" -ForegroundColor Red
-        Read-Host "按回车退出"
+        Write-Host "[ERROR] Frontend dependencies install failed" -ForegroundColor Red
+        Read-Host "Press Enter to exit"
         exit 1
     }
-    Write-Host "  [OK] 前端依赖已就绪" -ForegroundColor Green
+    Write-Host "  [OK] Frontend dependencies ready" -ForegroundColor Green
 } else {
-    Write-Host "`n[2/4] 前端依赖已存在，跳过安装" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "[2/4] Frontend dependencies exist, skip install" -ForegroundColor Green
 }
 
-# 5. 检查数据库
+# 5. Check database
 $dbFile = Join-Path $BackendDir "data\example_db.sqlite"
 if (-not (Test-Path $dbFile)) {
-    Write-Host "`n[3/4] 初始化数据库..." -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "[3/4] Initializing database..." -ForegroundColor Yellow
     Push-Location $BackendDir
     if (Test-Path $venvPath) {
         $pythonExe = Join-Path $venvPath "Scripts\python.exe"
@@ -122,57 +128,50 @@ if (-not (Test-Path $dbFile)) {
         & $pythonCmd init_db.py
     }
     Pop-Location
-    Write-Host "  [OK] 数据库初始化完成" -ForegroundColor Green
+    Write-Host "  [OK] Database initialized" -ForegroundColor Green
 } else {
-    Write-Host "`n[3/4] 数据库已存在" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "[3/4] Database exists" -ForegroundColor Green
 }
 
-# 6. 启动后端服务
-Write-Host "`n[4/4] 启动服务..." -ForegroundColor Yellow
+# 6. Start backend service
+Write-Host ""
+Write-Host "[4/4] Starting services..." -ForegroundColor Yellow
 
-$backendStartCmd = @"
-    Set-Location "$BackendDir"
-    `$env:PYTHONPATH = "$BackendDir"
-"@
-
+$backendExe = $pythonCmd
 if (Test-Path $venvPath) {
-    $pythonExe = Join-Path $venvPath "Scripts\python.exe"
-    if (Test-Path $pythonExe) {
-        $backendStartCmd += "`n    & '$pythonExe' -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
-    } else {
-        $backendStartCmd += "`n    & '$pythonCmd' -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    $candidate = Join-Path $venvPath "Scripts\python.exe"
+    if (Test-Path $candidate) {
+        $backendExe = $candidate
     }
-} else {
-    $backendStartCmd += "`n    & '$pythonCmd' -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 }
 
-Start-Process powershell -ArgumentList @(
-    "-NoExit", "-Command", $backendStartCmd
-) -WindowStyle Normal -Title "CIM Backend API"
+$backendScript = "Set-Location '$BackendDir'; `$env:PYTHONPATH = '$BackendDir'; & '$backendExe' -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
-Write-Host "  后端API启动中..." -ForegroundColor Cyan
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $backendScript -WindowStyle Normal
+
+Write-Host "  Backend API starting..." -ForegroundColor Cyan
 Start-Sleep -Seconds 3
 
-# 7. 启动前端服务
-$frontendStartCmd = @"
-    Set-Location "$FrontendDir"
-    & '$npmCmd' run dev
-"@
+# 7. Start frontend service
+$frontendScript = "Set-Location '$FrontendDir'; & '$npmCmd' run dev"
 
-Start-Process powershell -ArgumentList @(
-    "-NoExit", "-Command", $frontendStartCmd
-) -WindowStyle Normal -Title "CIM Frontend"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $frontendScript -WindowStyle Normal
 
-Write-Host "  前端界面启动中..." -ForegroundColor Cyan
+Write-Host "  Frontend starting..." -ForegroundColor Cyan
 Start-Sleep -Seconds 3
 
-# 8. 完成提示
-Write-Host "`n========================================" -ForegroundColor Green
-Write-Host "  CIM Work Manager 启动完成!" -ForegroundColor Green
-Write-Host "========================================`n" -ForegroundColor Green
-Write-Host "  后端API: http://localhost:8000" -ForegroundColor White
-Write-Host "  前端界面: http://localhost:5173`n" -ForegroundColor White
-Write-Host "  提示: 关闭 PowerShell 窗口即可停止服务`n" -ForegroundColor Yellow
+# 8. Done
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  CIM Work Manager started!" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  Backend API:  http://localhost:8000" -ForegroundColor White
+Write-Host "  Frontend UI:  http://localhost:5173" -ForegroundColor White
+Write-Host ""
+Write-Host "  Tip: Close PowerShell windows to stop services" -ForegroundColor Yellow
+Write-Host ""
 
 try {
     Start-Process "http://localhost:5173"
