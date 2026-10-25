@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Plus,
   Search,
@@ -25,6 +25,7 @@ import { ListSkeleton } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { level, taskStatus, priorityScoreStyle } from '@/constants/status';
 import { useClickOutside } from '@/hooks/useClickOutside';
+import { useDebouncedValue } from '@/hooks/useList';
 import { aiAPI, workItemsAPI } from '@/services/api';
 import type { WorkCategory, WorkItem, CreateWorkItemRequest } from '@/types';
 
@@ -108,6 +109,9 @@ export default function WorkItems() {
     }
   }, []);
 
+  // 搜索防抖后走服务端（后端 title/details ilike），不再只过滤已加载的 200 条
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
+
   const fetchWorkItems = useCallback(async () => {
     setLoading(true);
     try {
@@ -117,10 +121,12 @@ export default function WorkItems() {
         category_id?: number;
         status?: string;
         urgency?: string;
+        keyword?: string;
       } = { sort_by: 'priority_score', limit: 200 };
       if (selectedCategory) params.category_id = selectedCategory;
       if (statusFilter) params.status = statusFilter;
       if (urgencyFilter) params.urgency = urgencyFilter;
+      if (debouncedSearch.trim()) params.keyword = debouncedSearch.trim();
 
       const res = await workItemsAPI.list(params);
       if (res.success) {
@@ -133,7 +139,7 @@ export default function WorkItems() {
     } finally {
       setLoading(false);
     }
-  }, [selectedCategory, statusFilter, urgencyFilter]);
+  }, [selectedCategory, statusFilter, urgencyFilter, debouncedSearch]);
 
   useEffect(() => {
     fetchCategories();
@@ -143,16 +149,7 @@ export default function WorkItems() {
     fetchWorkItems();
   }, [fetchWorkItems]);
 
-  /** 搜索只影响展示层，不破坏已加载列表 */
-  const visibleItems = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return workItems;
-    return workItems.filter(
-      (item) =>
-        item.title.toLowerCase().includes(q) ||
-        (item.details && item.details.toLowerCase().includes(q))
-    );
-  }, [workItems, searchQuery]);
+  const visibleItems = workItems;
 
   const toggleStatus = async (item: WorkItem) => {
     const nextStatus = item.status === 'completed' ? 'pending' : 'completed';

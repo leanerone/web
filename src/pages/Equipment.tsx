@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Cpu,
   Search,
@@ -21,6 +21,7 @@ import { EquipmentStatusBadge } from '@/components/ui/Badge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { useNavigate } from 'react-router-dom';
+import { useList, useDebouncedValue } from '@/hooks/useList';
 import { equipmentAPI, settingsAPI } from '@/services/api';
 import useAppStore from '@/stores/appStore';
 import type { Equipment } from '@/types';
@@ -58,11 +59,12 @@ function buildGitSourceKey(item: Equipment): string {
 export default function Equipment() {
   const navigate = useNavigate();
   const { setEquipment } = useAppStore();
-  const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
+  const debouncedSearch = useDebouncedValue(searchQuery, 300);
   const [refreshing, setRefreshing] = useState(false);
   const [gitBaseUrl, setGitBaseUrl] = useState<string>(DEFAULT_GIT_BASE_URL);
   const [gitSourceMap, setGitSourceMap] = useState<Record<string, string>>(DEFAULT_GIT_SOURCE_MAP);
@@ -71,20 +73,19 @@ export default function Equipment() {
   const [gitEditMap, setGitEditMap] = useState<Array<{ code: string; path: string }>>([]);
   const [gitSaving, setGitSaving] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  /** 统计用全量数据（仅首次/手动刷新时拉取一次），表格走服务端分页 */
+  const [statsData, setStatsData] = useState<Equipment[]>([]);
 
-  /** 加载机台列表 + Git Source 映射 (并行) */
-  const fetchEquipment = async () => {
-    setLoading(true);
+  /** Git Source 映射 + 统计全量（并行，低频） */
+  const fetchMeta = useCallback(async () => {
     try {
       const [eqRes, setRes] = await Promise.all([
-        equipmentAPI.list({ page: 1, limit: 1000 }),
+        equipmentAPI.list({ page: 1, limit: 10000 }),
         settingsAPI.list('equipment').catch(() => ({ success: false, data: [] as { key: string; value: string }[] })),
       ]);
       if (eqRes.success) {
-        setEquipmentList(eqRes.data);
+        setStatsData(eqRes.data);
         setEquipment(eqRes.data);
-      } else {
-        toast.error(eqRes.message || '机台列表加载失败');
       }
       if (setRes.success && Array.isArray(setRes.data)) {
         const baseRow = setRes.data.find((s) => s.key === 'git_source_base_url');
@@ -95,20 +96,39 @@ export default function Equipment() {
         }
       }
     } catch {
-      toast.error('机台列表加载失败，量产环境需配置 PANJOB 数据库连接');
-    } finally {
-      setLoading(false);
+      toast.error('机台统计加载失败，量产环境需配置 PANJOB 数据库连接');
     }
-  };
+  }, [setEquipment]);
 
   useEffect(() => {
-    fetchEquipment();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    fetchMeta();
+  }, [fetchMeta]);
+
+  /** 表格数据：服务端 keyword/type 筛选 + 分页（每页 50，不再全量拉取） */
+  const { data: pageData, total, loading, refresh } = useList<Equipment, Record<string, unknown>>(
+    (p) => equipmentAPI.list(p as { page: number; limit: number; keyword?: string; equipment_type?: string }),
+    {
+      page,
+      limit: PAGE_SIZE,
+      ...(debouncedSearch.trim() ? { keyword: debouncedSearch.trim() } : {}),
+      ...(typeFilter !== 'all' ? { equipment_type: typeFilter } : {}),
+    }
+  );
+
+  // 状态筛选后端不支持，在当前页内过滤
+  const tableData = useMemo(
+    () => (statusFilter === 'all' ? pageData : pageData.filter((e) => e.status === statusFilter)),
+    [pageData, statusFilter]
+  );
+
+  // 关键字/类型变化时回到第一页
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, typeFilter, statusFilter]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await fetchEquipment();
+    await Promise.all([refresh(), fetchMeta()]);
     setRefreshing(false);
   };
 
@@ -122,7 +142,7 @@ export default function Equipment() {
 
   const handleExport = () => {
     const headers = ['机台编号', '机台类型', '机台型号', '厂区', '产线', 'CC服务器', '负责人', '操作系统', '服务器类型', 'SOURCE源码分类', '状态', '位置', 'GitURL'];
-    const rows = filteredEquipment.map((item) => [
+    const rows = tableData.map((item) => [
       item.eq_name, item.eq_type, item.eq_model, item.area, item.line ?? '',
       item.server_id, item.chargeman ?? '', item.os ?? '', item.driver_type,
       item.source_code ?? '', item.status, item.location, buildGitUrl(item),
@@ -189,35 +209,21 @@ export default function Equipment() {
   };
 
   const equipmentTypes = useMemo(
-    () => [...new Set(equipmentList.map((e) => e.eq_type).filter(Boolean))],
-    [equipmentList],
+    () => [...new Set(statsData.map((e) => e.eq_type).filter(Boolean))],
+    [statsData],
   );
 
-  const filteredEquipment = useMemo(() => equipmentList.filter((item) => {
-    const q = searchQuery.toLowerCase().trim();
-    const matchesSearch = !q ||
-      item.eq_name?.toLowerCase().includes(q) ||
-      item.ap_name?.toLowerCase().includes(q) ||
-      item.eq_model?.toLowerCase().includes(q) ||
-      item.vendor?.toLowerCase().includes(q) ||
-      item.server_id?.toLowerCase().includes(q) ||
-      (item.chargeman ?? '').toLowerCase().includes(q) ||
-      (item.source_code ?? '').includes(q);
-    const matchesType = typeFilter === 'all' || item.eq_type === typeFilter;
-    const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
-    return matchesSearch && matchesType && matchesStatus;
-  }), [equipmentList, searchQuery, typeFilter, statusFilter]);
-
   const stats = useMemo(() => ([
-    { label: '机台总数', value: equipmentList.length, tone: 'bg-accent-50 text-accent-600' },
-    { label: '在线', value: equipmentList.filter((e) => e.status === 'online').length, tone: 'bg-emerald-50 text-emerald-600' },
-    { label: '维护中', value: equipmentList.filter((e) => e.status === 'maintenance').length, tone: 'bg-amber-50 text-amber-600' },
-    { label: '离线', value: equipmentList.filter((e) => e.status === 'offline').length, tone: 'bg-red-50 text-red-600' },
+    { label: '机台总数', value: statsData.length, tone: 'bg-accent-50 text-accent-600' },
+    { label: '在线', value: statsData.filter((e) => e.status === 'online').length, tone: 'bg-emerald-50 text-emerald-600' },
+    { label: '维护中', value: statsData.filter((e) => e.status === 'maintenance').length, tone: 'bg-amber-50 text-amber-600' },
+    { label: '离线', value: statsData.filter((e) => e.status === 'offline').length, tone: 'bg-red-50 text-red-600' },
     { label: '机型数', value: equipmentTypes.length, tone: 'bg-blue-50 text-blue-600' },
-    { label: '有 Git 源码', value: equipmentList.filter((e) => buildGitUrl(e)).length, tone: 'bg-violet-50 text-violet-600' },
-  ]), [equipmentList, equipmentTypes, gitBaseUrl, gitSourceMap]);
+    { label: '有 Git 源码', value: statsData.filter((e) => buildGitUrl(e)).length, tone: 'bg-violet-50 text-violet-600' },
+  ]), [statsData, equipmentTypes, gitBaseUrl, gitSourceMap]);
 
   const COL_COUNT = 14;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="animate-fade-in space-y-4">
@@ -271,7 +277,7 @@ export default function Equipment() {
           <Button variant="ghost" size="sm" onClick={handleRefresh} loading={refreshing}>
             <RefreshCw className="h-4 w-4" /> 刷新
           </Button>
-          <Button variant="secondary" size="sm" onClick={handleExport} disabled={filteredEquipment.length === 0}>
+          <Button variant="secondary" size="sm" onClick={handleExport} disabled={tableData.length === 0}>
             <Download className="h-4 w-4" /> 导出 CSV
           </Button>
           <Button variant="secondary" size="sm" onClick={openGitModal}>
@@ -310,7 +316,7 @@ export default function Equipment() {
                   ))}
                 </tr>
               ))
-            ) : filteredEquipment.length === 0 ? (
+            ) : tableData.length === 0 ? (
               <tr>
                 <td colSpan={COL_COUNT} className="py-14 text-center">
                   <Cpu className="mx-auto mb-3 h-10 w-10 text-gray-200" />
@@ -319,7 +325,7 @@ export default function Equipment() {
                 </td>
               </tr>
             ) : (
-              filteredEquipment.map((item) => {
+              tableData.map((item) => {
                 const gitUrl = buildGitUrl(item);
                 const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
                 const isCopied = copiedKey === eqKey;
@@ -417,6 +423,40 @@ export default function Equipment() {
         </table>
       </div>
 
+      {/* 分页器 */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm">
+          <span className="text-xs text-gray-400">
+            共 {total} 台 · 第 {page} / {totalPages} 页
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              上一页
+            </Button>
+            {Array.from({ length: totalPages }).slice(0, 10).map((_, i) => {
+              const p = i + 1;
+              return (
+                <button
+                  key={p}
+                  onClick={() => setPage(p)}
+                  className={`h-7 min-w-7 rounded-md px-1.5 text-xs tabular-nums transition-colors ${
+                    p === page
+                      ? 'bg-accent-600 font-medium text-white'
+                      : 'text-gray-500 hover:bg-gray-100'
+                  }`}
+                >
+                  {p}
+                </button>
+              );
+            })}
+            {totalPages > 10 && <span className="px-1 text-xs text-gray-300">…</span>}
+            <Button variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              下一页
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Git Source 配置弹窗 */}
       <Modal isOpen={isGitModalOpen} onClose={() => setIsGitModalOpen(false)} title="Git Source 配置" size="lg">
         <div className="space-y-5">
@@ -450,7 +490,7 @@ export default function Equipment() {
                   onClick={() => {
                     const existing = new Map(gitEditMap.map((r) => [r.code, r.path]));
                     const keys = new Set<string>();
-                    equipmentList.forEach((eq) => {
+                    statsData.forEach((eq) => {
                       const k = buildGitSourceKey(eq);
                       if (k && k !== '|') keys.add(k);
                     });

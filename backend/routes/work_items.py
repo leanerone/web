@@ -64,9 +64,10 @@ def list_work_items(
     sort_by: str = Query("priority_score"),
     limit: int = Query(100),
     offset: int = Query(0),
+    keyword: str = Query(None, description="按标题/详情模糊搜索"),
     db: Session = Depends(get_db)
 ):
-    return {"success": True, "data": get_work_items(db, category_id, status, project_id, urgency, importance, sort_by, limit, offset)}
+    return {"success": True, "data": get_work_items(db, category_id, status, project_id, urgency, importance, sort_by, limit, offset, keyword)}
 
 
 @router.get("/items/{item_id}")

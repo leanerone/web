@@ -288,6 +288,7 @@ export const workItemsAPI = {
     sort_by?: string;
     limit?: number;
     offset?: number;
+    keyword?: string;
   }): Promise<APIResponse<import('@/types').WorkItem[]>> =>
     api.get('/work/items', { params }),
   

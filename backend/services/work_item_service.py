@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from database.models import WorkCategory, WorkItem, DailyPlan, WorkLog
 from schemas.work_items import (
     WorkCategoryCreate, WorkCategoryUpdate,
@@ -72,8 +73,11 @@ def init_default_categories(db: Session):
 def get_work_items(db: Session, category_id: int = None, status: str = None, 
                    project_id: int = None, urgency: str = None,
                    importance: str = None, sort_by: str = "priority_score",
-                   limit: int = 100, offset: int = 0):
+                   limit: int = 100, offset: int = 0, keyword: str = None):
     query = db.query(WorkItem)
+    if keyword:
+        like = f"%{keyword}%"
+        query = query.filter(or_(WorkItem.title.ilike(like), WorkItem.details.ilike(like)))
     if category_id:
         query = query.filter(WorkItem.category_id == category_id)
     if status:
