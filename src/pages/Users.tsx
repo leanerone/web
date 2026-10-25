@@ -6,6 +6,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { RoleBadge, UserStatusBadge } from '@/components/ui/Badge';
 import { toast } from '@/components/ui/Toast';
+import { confirmAction } from '@/components/ui/ConfirmDialog';
 import { userAPI } from '@/services/api';
 import type { User } from '@/types';
 
@@ -118,7 +119,7 @@ export default function UserManagement() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('确定要删除这个用户吗？')) return;
+    if (!(await confirmAction({ title: '删除用户', message: '确定要删除这个用户吗？', confirmText: '删除', danger: true }))) return;
     try {
       const res = await userAPI.delete(id);
       if (res.success) {

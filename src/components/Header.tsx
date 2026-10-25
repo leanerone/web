@@ -217,11 +217,11 @@ export default function Header({ title, subtitle }: HeaderProps) {
               </div>
               <div className="py-1.5">
                 <button
-                  onClick={() => { userMenu.setOpen(false); navigate('/profile'); }}
+                  onClick={() => { userMenu.setOpen(false); navigate('/settings?tab=account'); }}
                   className="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-600 transition-colors hover:bg-gray-50"
                 >
                   <User className="h-4 w-4" />
-                  个人资料
+                  个人资料（设置）
                 </button>
                 <button
                   onClick={handleLogout}

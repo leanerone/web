@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Bot,
   Database,
@@ -9,10 +10,14 @@ import {
   Key,
   Globe,
   SlidersHorizontal,
+  Users,
+  User,
 } from 'lucide-react';
 import Button from '@/components/Button';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
+import UserManagement from '@/pages/Users';
+import Profile from '@/pages/Profile';
 import { settingsAPI } from '@/services/api';
 import type { AISettings, NotesSettings } from '@/types';
 
@@ -21,10 +26,14 @@ const inputCls =
 const labelCls = 'mb-1.5 flex items-center gap-1.5 text-sm font-medium text-gray-700';
 const hintCls = 'mt-1 text-xs text-gray-400';
 
-type Tab = 'general' | 'ai' | 'notes';
+type Tab = 'general' | 'ai' | 'notes' | 'members' | 'account';
 
 export default function SystemSettings() {
-  const [activeTab, setActiveTab] = useState<Tab>('general');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const t = searchParams.get('tab');
+    return t === 'ai' || t === 'notes' || t === 'members' || t === 'account' ? t : 'general';
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -131,9 +140,16 @@ export default function SystemSettings() {
     { id: 'general', label: '通用', description: '系统基础信息', icon: SlidersHorizontal },
     { id: 'ai', label: 'AI 配置', description: '大模型 API 连接', icon: Bot },
     { id: 'notes', label: 'Notes', description: 'HCL Notes 文档同步', icon: Database },
+    { id: 'members', label: '成员', description: '用户与权限管理', icon: Users },
+    { id: 'account', label: '账户', description: '个人资料与 Notes 同步', icon: User },
   ];
 
   const currentTab = tabs.find((t) => t.id === activeTab)!;
+
+  const switchTab = (tab: Tab) => {
+    setActiveTab(tab);
+    setSearchParams(tab === 'general' ? {} : { tab }, { replace: true });
+  };
 
   return (
     <div className="animate-fade-in flex gap-8">
@@ -147,7 +163,7 @@ export default function SystemSettings() {
             return (
               <li key={tab.id}>
                 <button
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => switchTab(tab.id)}
                   className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
                     active
                       ? 'bg-gray-100 font-medium text-gray-900'
@@ -165,18 +181,24 @@ export default function SystemSettings() {
 
       {/* 右侧内容 */}
       <div className="min-w-0 flex-1">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <h2 className="text-base font-semibold text-gray-900">{currentTab.label}</h2>
-            <p className="mt-0.5 text-xs text-gray-400">{currentTab.description}</p>
-          </div>
-          <Button onClick={handleSave} loading={saving} size="sm">
-            <Save className="h-4 w-4" /> 保存
-          </Button>
-        </div>
+        {activeTab === 'members' ? (
+          <UserManagement />
+        ) : activeTab === 'account' ? (
+          <Profile />
+        ) : (
+          <>
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">{currentTab.label}</h2>
+                <p className="mt-0.5 text-xs text-gray-400">{currentTab.description}</p>
+              </div>
+              <Button onClick={handleSave} loading={saving} size="sm">
+                <Save className="h-4 w-4" /> 保存
+              </Button>
+            </div>
 
-        <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
-          {loading ? (
+            <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+              {loading ? (
             <div className="space-y-4 p-6">
               <Skeleton className="h-10 w-2/3" />
               <Skeleton className="h-10 w-full" />
@@ -310,10 +332,12 @@ export default function SystemSettings() {
                   />
                 </div>
               </div>
-              <p className={hintCls}>保存后可在「个人资料」页执行文档同步与导入</p>
+              <p className={hintCls}>保存后可在「设置 → 账户」页执行文档同步与导入</p>
             </div>
           )}
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

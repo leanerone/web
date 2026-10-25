@@ -5,9 +5,6 @@ import {
   Mail,
   Shield,
   Settings,
-  CheckCircle2,
-  Lock,
-  Bell,
   Globe,
   FileDown,
   RefreshCw,
@@ -210,7 +207,7 @@ export default function Profile() {
                   <Mail className="w-4 h-4" />
                   <span className="text-sm">邮箱</span>
                 </div>
-                <p className="text-gray-800">{user?.username ? `${user.username}@${user.domain || 'company'}.com` : '-'}</p>
+                <p className="text-gray-800">{user?.username ? `${user.username}（域账号登录，未配置邮箱）` : '-'}</p>
               </div>
 
               <div className="p-4 bg-gray-50 rounded-lg">
@@ -272,59 +269,6 @@ export default function Profile() {
           </Card>
 
           <Card className="lg:col-span-3">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">账号安全</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
-                <div>
-                  <p className="text-gray-800 font-medium">修改密码</p>
-                  <p className="text-sm text-gray-500">定期更换密码以保证账号安全</p>
-                </div>
-                <Button variant="secondary" size="sm">
-                  <Lock className="w-4 h-4" />
-                  修改
-                </Button>
-              </div>
-
-              <div className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
-                <div>
-                  <p className="text-gray-800 font-medium">双因素认证</p>
-                  <p className="text-sm text-gray-500">增强账号安全性</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-10 h-6 bg-green-100 rounded-full relative">
-                    <span className="absolute right-1 top-1 w-4 h-4 bg-green-500 rounded-full" />
-                  </span>
-                  <span className="text-sm text-green-600">已启用</span>
-                </div>
-              </div>
-
-              <div className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
-                <div>
-                  <p className="text-gray-800 font-medium">登录通知</p>
-                  <p className="text-sm text-gray-500">当有新设备登录时发送通知</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-10 h-6 bg-green-100 rounded-full relative">
-                    <span className="absolute right-1 top-1 w-4 h-4 bg-green-500 rounded-full" />
-                  </span>
-                  <span className="text-sm text-green-600">已启用</span>
-                </div>
-              </div>
-
-              <div className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
-                <div>
-                  <p className="text-gray-800 font-medium">活动日志</p>
-                  <p className="text-sm text-gray-500">查看最近的登录和操作记录</p>
-                </div>
-                <Button variant="secondary" size="sm">
-                  <CheckCircle2 className="w-4 h-4" />
-                  查看
-                </Button>
-              </div>
-            </div>
-          </Card>
-
-          <Card className="lg:col-span-3">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-800">HCL Notes 文档同步</h3>
               <Button onClick={() => setIsNotesModalOpen(true)}>
@@ -381,55 +325,6 @@ export default function Profile() {
             </div>
           </Card>
 
-          <Card className="lg:col-span-3">
-            <h3 className="text-lg font-semibold text-gray-800 mb-4">通知设置</h3>
-            <div className="space-y-4">
-              <div className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Bell className="w-5 h-5 text-accent-600" />
-                  <div>
-                    <p className="text-gray-800 font-medium">项目更新通知</p>
-                    <p className="text-sm text-gray-500">当项目状态变更时接收通知</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-10 h-6 bg-green-100 rounded-full relative">
-                    <span className="absolute right-1 top-1 w-4 h-4 bg-green-500 rounded-full" />
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Bell className="w-5 h-5 text-blue-600" />
-                  <div>
-                    <p className="text-gray-800 font-medium">需求分配通知</p>
-                    <p className="text-sm text-gray-500">当有新需求分配给您时接收通知</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-10 h-6 bg-green-100 rounded-full relative">
-                    <span className="absolute right-1 top-1 w-4 h-4 bg-green-500 rounded-full" />
-                  </span>
-                </div>
-              </div>
-
-              <div className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <Bell className="w-5 h-5 text-orange-600" />
-                  <div>
-                    <p className="text-gray-800 font-medium">周报提醒</p>
-                    <p className="text-sm text-gray-500">每周五下午发送周报生成提醒</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-10 h-6 bg-green-100 rounded-full relative">
-                    <span className="absolute right-1 top-1 w-4 h-4 bg-green-500 rounded-full" />
-                  </span>
-                </div>
-              </div>
-            </div>
-          </Card>
         </div>
       </div>
 

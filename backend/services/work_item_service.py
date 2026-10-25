@@ -111,6 +111,7 @@ def create_work_item(db: Session, data: WorkItemCreate):
     db.add(item)
     db.commit()
     db.refresh(item)
+    _create_log(db, item.id, "create", f"创建工作项: {item.title}")
     return item
 
 
@@ -119,12 +120,16 @@ def update_work_item(db: Session, item_id: int, data: WorkItemUpdate):
     if not item:
         return None
     update_data = data.model_dump(exclude_unset=True)
+    old_status = item.status
     for key, value in update_data.items():
         setattr(item, key, value)
     item.priority_score = calculate_priority(item.urgency, item.importance)
     db.commit()
     db.refresh(item)
-    _create_log(db, item_id, "update", f"更新工作项: {item.title}")
+    if "status" in update_data and update_data["status"] != old_status:
+        _create_log(db, item_id, "status", f"状态变更: {old_status} → {item.status}")
+    else:
+        _create_log(db, item_id, "update", f"更新工作项: {item.title}")
     return item
 
 
@@ -132,6 +137,9 @@ def delete_work_item(db: Session, item_id: int):
     item = get_work_item(db, item_id)
     if not item:
         return False
+    title = item.title
+    # 归档日志不带 item 外键（避免删除父行后违反外键约束），仅作审计流水
+    _create_log(db, None, "delete", f"删除工作项 #{item_id}: {title}")
     db.delete(item)
     db.commit()
     return True
@@ -225,7 +233,7 @@ def get_work_logs(db: Session, work_item_id: int = None):
     return query.order_by(WorkLog.created_at.desc()).all()
 
 
-def _create_log(db: Session, work_item_id: int, action: str, description: str):
+def _create_log(db: Session, work_item_id: int | None, action: str, description: str):
     log = WorkLog(
         work_item_id=work_item_id,
         action=action,

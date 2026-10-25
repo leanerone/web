@@ -15,6 +15,7 @@ import EmptyState from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { ProjectStatusBadge } from '@/components/ui/Badge';
 import { toast } from '@/components/ui/Toast';
+import { confirmAction } from '@/components/ui/ConfirmDialog';
 import { useNavigate } from 'react-router-dom';
 import { projectAPI } from '@/services/api';
 import useAppStore from '@/stores/appStore';
@@ -132,7 +133,7 @@ export default function Projects() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('确定要删除这个项目吗？')) return;
+    if (!(await confirmAction({ title: '删除项目', message: '确定要删除这个项目吗？项目下的任务将一并删除。', confirmText: '删除', danger: true }))) return;
     setOpenMenuId(null);
     try {
       const res = await projectAPI.delete(id);

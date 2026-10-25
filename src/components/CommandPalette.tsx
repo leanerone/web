@@ -38,7 +38,7 @@ const NAV_ITEMS = [
   { label: '机台', path: '/equipment', icon: Cpu, keywords: 'equipment 设备 equip' },
   { label: '周报', path: '/weekly-report', icon: FileText, keywords: '周报 报告 weekly report' },
   { label: '设置', path: '/settings', icon: Settings, keywords: 'settings 配置 ai notes' },
-  { label: '用户', path: '/users', icon: Users, keywords: 'users 成员 权限' },
+  { label: '成员管理', path: '/settings?tab=members', icon: Users, keywords: 'users 成员 权限 用户' },
 ];
 
 /** 关键字高亮：命中部分加粗着色 */

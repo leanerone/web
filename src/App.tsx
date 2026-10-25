@@ -12,12 +12,11 @@ import Requirements from '@/pages/Requirements';
 import RequirementDetail from '@/pages/RequirementDetail';
 import AIAssistant from '@/pages/AIAssistant';
 import WeeklyReport from '@/pages/WeeklyReport';
-import Profile from '@/pages/Profile';
-import Users from '@/pages/Users';
 import Settings from '@/pages/Settings';
 import Login from '@/pages/Login';
 import WorkItems from '@/pages/WorkItems';
 import { Toaster } from '@/components/ui/Toast';
+import { ConfirmDialogHost } from '@/components/ui/ConfirmDialog';
 import { useAuthStore } from '@/stores/authStore';
 import useAppStore, { applyTheme } from '@/stores/appStore';
 
@@ -70,8 +69,8 @@ function PageContent() {
           <Route path="/requirements/:id" element={<RequirementDetail />} />
           <Route path="/ai-assistant" element={<AIAssistant />} />
           <Route path="/weekly-report" element={<WeeklyReport />} />
-          <Route path="/profile" element={<Profile />} />
-          <Route path="/users" element={<Users />} />
+          <Route path="/profile" element={<Navigate to="/settings?tab=account" replace />} />
+          <Route path="/users" element={<Navigate to="/settings?tab=members" replace />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
@@ -112,6 +111,7 @@ function ProtectedApp() {
       <PageContent />
       <CommandPalette />
       <Toaster />
+      <ConfirmDialogHost />
     </div>
   );
 }

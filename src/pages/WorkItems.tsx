@@ -23,6 +23,7 @@ import Badge, { TaskStatusBadge, LevelBadge } from '@/components/ui/Badge';
 import EmptyState from '@/components/ui/EmptyState';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
+import { confirmAction } from '@/components/ui/ConfirmDialog';
 import { level, taskStatus, priorityScoreStyle } from '@/constants/status';
 import { useClickOutside } from '@/hooks/useClickOutside';
 import { useDebouncedValue } from '@/hooks/useList';
@@ -197,7 +198,7 @@ export default function WorkItems() {
   };
 
   const handleDeleteItem = async (id: number) => {
-    if (!confirm('确定要删除这个工作项吗？')) return;
+    if (!(await confirmAction({ title: '删除工作项', message: '确定要删除这个工作项吗？删除后不可恢复。', confirmText: '删除', danger: true }))) return;
     try {
       const res = await workItemsAPI.delete(id);
       if (res.success) {
@@ -243,7 +244,7 @@ export default function WorkItems() {
   };
 
   const handleDeleteCategory = async (id: number) => {
-    if (!confirm('确定要删除这个类别吗？关联的工作项将变为无类别。')) return;
+    if (!(await confirmAction({ title: '删除类别', message: '确定要删除这个类别吗？关联的工作项将变为无类别。', confirmText: '删除', danger: true }))) return;
     try {
       const res = await workItemsAPI.deleteCategory(id);
       if (res.success) {

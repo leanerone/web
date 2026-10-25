@@ -17,6 +17,7 @@ import Modal from '@/components/Modal';
 import EmptyState from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
+import { confirmAction } from '@/components/ui/ConfirmDialog';
 import { reportAPI, aiAPI } from '@/services/api';
 import type { Report } from '@/types';
 
@@ -84,7 +85,7 @@ export default function WeeklyReport() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('确定要删除这份周报吗？')) return;
+    if (!(await confirmAction({ title: '删除周报', message: '确定要删除这份周报吗？删除后不可恢复。', confirmText: '删除', danger: true }))) return;
     try {
       const res = await reportAPI.delete(id);
       if (res.success) {

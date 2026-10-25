@@ -18,6 +18,7 @@ import Button from '@/components/Button';
 import Modal from '@/components/Modal';
 import { PriorityBadge } from '@/components/ui/Badge';
 import { toast } from '@/components/ui/Toast';
+import { confirmAction } from '@/components/ui/ConfirmDialog';
 import { requirementAPI, equipmentAPI } from '@/services/api';
 import type { Requirement, Equipment, ChangeRecord } from '@/types';
 
@@ -192,7 +193,7 @@ export default function RequirementDetail() {
 
   const handleDelete = async () => {
     if (!requirement) return;
-    if (!confirm('确定要删除这个需求吗？')) return;
+    if (!(await confirmAction({ title: '删除需求', message: '确定要删除这个需求吗？删除后不可恢复。', confirmText: '删除', danger: true }))) return;
     try {
       const res = await requirementAPI.delete(requirement.id);
       if (res.success) {

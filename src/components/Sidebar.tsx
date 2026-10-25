@@ -8,7 +8,6 @@ import {
   ChevronRight,
   Zap,
   Settings,
-  Users,
   Briefcase,
   Sun,
   Moon,
@@ -53,7 +52,6 @@ const navGroups: { label: string; items: NavItem[] }[] = [
   {
     label: '管理',
     items: [
-      { id: 'users', icon: Users, label: '用户', path: '/users' },
       { id: 'settings', icon: Settings, label: '设置', path: '/settings' },
     ],
   },
