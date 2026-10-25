@@ -349,7 +349,7 @@ export default function Dashboard() {
               icon={<Zap className="h-4 w-4" />}
               label="AI 智能排序"
               tone="bg-accent-50 text-accent-600"
-              onClick={() => navigate('/ai-assistant')}
+              onClick={() => navigate('/work-items?sort=open')}
             />
             <QuickAction
               icon={<Sparkles className="h-4 w-4" />}

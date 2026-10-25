@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
+import { toast } from '@/components/ui/Toast';
 import { aiAPI, workItemsAPI } from '@/services/api';
 import type { WorkItem } from '@/types';
 
@@ -156,15 +157,26 @@ export default function AIAssistant() {
           timestamp: new Date(),
         };
         setMessages(prev => [...prev, aiMessage]);
+      } else {
+        const errMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          type: 'ai',
+          content: `本次请求失败：${res.message || '服务返回异常'}。请稍后重试，或到「设置 → AI 配置」检查 API 连接。`,
+          timestamp: new Date(),
+        };
+        setMessages(prev => [...prev, errMessage]);
+        toast.error('AI 请求失败');
       }
     } catch {
-      const aiMessage: Message = {
+      // 诚实失败：明确告知未连通，绝不伪造 AI 回复
+      const errMessage: Message = {
         id: (Date.now() + 1).toString(),
         type: 'ai',
-        content: `收到您的需求。当前系统中有 ${workItems.length} 个工作项，我可以帮您进行优先级分析、日程规划等。请问您需要我帮您做什么？`,
+        content: '无法连接 AI 服务。请先在「设置 → AI 配置」填写 API Key 并测试连接，确认后端服务正在运行后重试。',
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages(prev => [...prev, errMessage]);
+      toast.error('AI 服务连接失败');
     } finally {
       setLoading(false);
     }

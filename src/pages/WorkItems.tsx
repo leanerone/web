@@ -12,7 +12,10 @@ import {
   X,
   ListTodo,
   Briefcase,
+  ArrowDownWideNarrow,
+  Check,
 } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
@@ -21,13 +24,21 @@ import EmptyState from '@/components/ui/EmptyState';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { level, taskStatus, priorityScoreStyle } from '@/constants/status';
-import { workItemsAPI } from '@/services/api';
+import { useClickOutside } from '@/hooks/useClickOutside';
+import { aiAPI, workItemsAPI } from '@/services/api';
 import type { WorkCategory, WorkItem, CreateWorkItemRequest } from '@/types';
 
 const inputCls =
   'rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 transition-colors focus:border-accent-500 focus:bg-white focus:outline-none';
 
+const AI_SORT_STRATEGIES = [
+  { value: 'priority', label: '按优先级', desc: '综合紧急度、重要性与截止日期' },
+  { value: 'deadline', label: '按截止日期', desc: '最紧急的截止日期排在最前' },
+  { value: 'category', label: '按类别', desc: '同类工作集中处理，减少切换成本' },
+] as const;
+
 export default function WorkItems() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [categories, setCategories] = useState<WorkCategory[]>([]);
   const [workItems, setWorkItems] = useState<WorkItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<number | null>(null);
@@ -41,6 +52,45 @@ export default function WorkItems() {
   const [editingItem, setEditingItem] = useState<WorkItem | null>(null);
   const [importedCount, setImportedCount] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  // AI 智能排序
+  const sortMenu = useClickOutside<HTMLDivElement>(() => {});
+  const [aiSorting, setAiSorting] = useState(false);
+  const [aiSortNote, setAiSortNote] = useState<string>('');
+
+  // 从仪表盘快捷入口跳转时自动展开排序菜单（?sort=open）
+  useEffect(() => {
+    if (searchParams.get('sort') === 'open') {
+      sortMenu.setOpen(true);
+      searchParams.delete('sort');
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** 调用 AI 智能排序，按返回顺序重排当前列表 */
+  const handleSmartSort = async (strategy: string) => {
+    sortMenu.setOpen(false);
+    if (workItems.length < 2) {
+      toast.info('工作项太少，无需排序');
+      return;
+    }
+    setAiSorting(true);
+    try {
+      const res = await aiAPI.smartSort({ work_items: workItems, strategy });
+      if (res.success) {
+        const order = new Map<number, number>(res.data.sorted_items.map((it, idx) => [it.id, idx]));
+        setWorkItems((prev) => [...prev].sort((a, b) => (order.get(a.id) ?? 999) - (order.get(b.id) ?? 999)));
+        setAiSortNote(res.data.explanation);
+        toast.success('AI 排序已应用');
+      } else {
+        toast.error(res.message || '排序失败');
+      }
+    } catch {
+      toast.error('AI 排序失败，请检查后端服务');
+    } finally {
+      setAiSorting(false);
+    }
+  };
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -274,6 +324,45 @@ export default function WorkItems() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {/* AI 智能排序 */}
+          {aiSortNote && (
+            <button
+              onClick={() => setAiSortNote('')}
+              className="hidden items-center gap-1.5 rounded-full bg-accent-50 px-2.5 py-1 text-xs text-accent-700 ring-1 ring-accent-200 transition-colors hover:bg-accent-100 lg:flex"
+              title="点击恢复默认排序"
+            >
+              <Sparkles className="h-3 w-3" />
+              {aiSortNote}
+              <X className="h-3 w-3" />
+            </button>
+          )}
+          <div className="relative" ref={sortMenu.ref}>
+            <Button
+              variant={aiSortNote ? 'primary' : 'secondary'}
+              size="sm"
+              loading={aiSorting}
+              onClick={() => sortMenu.setOpen(!sortMenu.open)}
+            >
+              <ArrowDownWideNarrow className="h-4 w-4" /> AI 排序
+            </Button>
+            {sortMenu.open && (
+              <div className="absolute right-0 top-9 z-50 w-60 rounded-lg border border-gray-200 bg-white py-1.5 shadow-lg">
+                {AI_SORT_STRATEGIES.map((s) => (
+                  <button
+                    key={s.value}
+                    onClick={() => handleSmartSort(s.value)}
+                    className="flex w-full flex-col items-start gap-0.5 px-3.5 py-2 text-left transition-colors hover:bg-gray-50"
+                  >
+                    <span className="flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                      {s.label}
+                      {aiSortNote.includes(s.desc.slice(0, 4)) && <Check className="h-3.5 w-3.5 text-accent-500" />}
+                    </span>
+                    <span className="text-xs text-gray-400">{s.desc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <Button variant="secondary" size="sm" onClick={handleExportTable} disabled={visibleItems.length === 0}>
             <Download className="h-4 w-4" /> 导出
           </Button>

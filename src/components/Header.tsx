@@ -1,13 +1,23 @@
-import { User, LogOut, ShieldCheck, Sun, Moon } from 'lucide-react';
+import { useCallback, useState } from 'react';
+import { User, LogOut, ShieldCheck, Sun, Moon, Bell, AlertCircle, Zap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import useAppStore from '@/stores/appStore';
 import { useClickOutside } from '@/hooks/useClickOutside';
+import { aiAPI, workItemsAPI } from '@/services/api';
 import { role } from '@/constants/status';
+import type { WorkItem } from '@/types';
 
 interface HeaderProps {
   title: string;
   subtitle?: string;
+}
+
+interface ReminderItem {
+  type: string;
+  item_id: number;
+  title: string;
+  message: string;
 }
 
 export default function Header({ title, subtitle }: HeaderProps) {
@@ -15,6 +25,10 @@ export default function Header({ title, subtitle }: HeaderProps) {
   const { user, logout } = useAuthStore();
   const { theme, toggleTheme } = useAppStore();
   const userMenu = useClickOutside<HTMLDivElement>(() => {});
+  const notifMenu = useClickOutside<HTMLDivElement>(() => {});
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [reminders, setReminders] = useState<ReminderItem[]>([]);
+  const [notifLoaded, setNotifLoaded] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -22,6 +36,30 @@ export default function Header({ title, subtitle }: HeaderProps) {
   };
 
   const getInitials = (name: string) => (name ? name.charAt(0).toUpperCase() : 'U');
+
+  /** 打开通知时拉取真实提醒（逾期 + 高优先级，来自后端 check-reminders） */
+  const loadNotifications = useCallback(async () => {
+    setNotifLoading(true);
+    try {
+      const itemsRes = await workItemsAPI.list({ sort_by: 'priority_score', limit: 200 });
+      const items: WorkItem[] = itemsRes.success ? itemsRes.data : [];
+      const res = await aiAPI.checkReminders({ work_items: items });
+      if (res.success) {
+        setReminders(res.data.reminders);
+      }
+    } catch {
+      setReminders([]);
+    } finally {
+      setNotifLoading(false);
+      setNotifLoaded(true);
+    }
+  }, []);
+
+  const handleToggleNotif = () => {
+    const next = !notifMenu.open;
+    notifMenu.setOpen(next);
+    if (next && !notifLoaded) loadNotifications();
+  };
 
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center justify-between border-b border-gray-200 bg-white/90 px-6 backdrop-blur">
@@ -39,12 +77,88 @@ export default function Header({ title, subtitle }: HeaderProps) {
           {theme === 'classic' ? <Sun className="h-[18px] w-[18px]" /> : <Moon className="h-[18px] w-[18px]" />}
         </button>
 
+        {/* 通知：真实逾期/高优先级提醒 */}
+        <div className="relative" ref={notifMenu.ref}>
+          <button
+            onClick={handleToggleNotif}
+            className="relative rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+            title="提醒"
+          >
+            <Bell className="h-[18px] w-[18px]" />
+            {reminders.length > 0 && (
+              <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white">
+                {reminders.length > 9 ? '9+' : reminders.length}
+              </span>
+            )}
+          </button>
+
+          {notifMenu.open && (
+            <div className="absolute right-0 top-11 z-50 w-80 rounded-xl border border-gray-200 bg-white shadow-lg">
+              <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+                <h3 className="text-sm font-semibold text-gray-800">提醒</h3>
+                <button
+                  onClick={loadNotifications}
+                  className="text-xs text-accent-600 hover:text-accent-700"
+                >
+                  刷新
+                </button>
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {notifLoading ? (
+                  <div className="space-y-2 p-4">
+                    {[1, 2, 3].map((i) => (
+                      <div key={i} className="h-12 animate-pulse rounded-lg bg-gray-100" />
+                    ))}
+                  </div>
+                ) : reminders.length === 0 ? (
+                  <div className="px-4 py-8 text-center">
+                    <Zap className="mx-auto mb-2 h-6 w-6 text-gray-300" />
+                    <p className="text-sm text-gray-400">一切正常，没有需要关注的提醒</p>
+                  </div>
+                ) : (
+                  reminders.map((r, idx) => (
+                    <button
+                      key={`${r.item_id}-${idx}`}
+                      onClick={() => {
+                        notifMenu.setOpen(false);
+                        navigate('/work-items');
+                      }}
+                      className="flex w-full items-start gap-3 border-b border-gray-50 px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-gray-50"
+                    >
+                      <AlertCircle
+                        className={`mt-0.5 h-4 w-4 flex-shrink-0 ${
+                          r.type === 'overdue' ? 'text-red-500' : 'text-amber-500'
+                        }`}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-gray-800">{r.title}</p>
+                        <p className="mt-0.5 text-xs text-gray-400">{r.message}</p>
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+              {reminders.length > 0 && (
+                <button
+                  onClick={() => {
+                    notifMenu.setOpen(false);
+                    navigate('/work-items');
+                  }}
+                  className="w-full border-t border-gray-100 py-2.5 text-center text-xs text-accent-600 transition-colors hover:bg-gray-50"
+                >
+                  前往工作台处理
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="relative" ref={userMenu.ref}>
           <button
             onClick={() => userMenu.setOpen(!userMenu.open)}
             className="flex items-center gap-2.5 rounded-lg py-1 pl-1 pr-2 transition-colors hover:bg-gray-100"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-full brand-gradient">
+            <div className="brand-gradient flex h-8 w-8 items-center justify-center rounded-full">
               <span className="text-sm font-medium text-white">
                 {user ? getInitials(user.display_name) : <User className="h-4 w-4 text-white" />}
               </span>
@@ -64,7 +178,7 @@ export default function Header({ title, subtitle }: HeaderProps) {
             <div className="absolute right-0 top-11 z-50 w-64 rounded-xl border border-gray-200 bg-white shadow-lg">
               <div className="border-b border-gray-100 p-4">
                 <div className="mb-2 flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full brand-gradient">
+                  <div className="brand-gradient flex h-9 w-9 items-center justify-center rounded-full">
                     <span className="font-medium text-white">{user ? getInitials(user.display_name) : 'U'}</span>
                   </div>
                   <div className="min-w-0 flex-1">
