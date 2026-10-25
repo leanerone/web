@@ -57,12 +57,19 @@ export default function WorkItems() {
   const [aiSorting, setAiSorting] = useState(false);
   const [aiSortNote, setAiSortNote] = useState<string>('');
 
-  // 从仪表盘快捷入口跳转时自动展开排序菜单（?sort=open）
+  // 从仪表盘快捷入口/命令面板跳转时自动展开对应弹窗（?sort=open / ?new=1 / ?import=1）
   useEffect(() => {
     if (searchParams.get('sort') === 'open') {
       sortMenu.setOpen(true);
-      searchParams.delete('sort');
-      setSearchParams(searchParams, { replace: true });
+    }
+    if (searchParams.get('new') === '1') {
+      setIsCreateModalOpen(true);
+    }
+    if (searchParams.get('import') === '1') {
+      setIsImportModalOpen(true);
+    }
+    if (searchParams.toString()) {
+      setSearchParams({}, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

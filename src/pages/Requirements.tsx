@@ -114,6 +114,11 @@ export default function Requirements() {
     if (eq && eq !== equipmentFilter) {
       setEquipmentFilter(eq);
     }
+    if (searchParams.get('new') === '1') {
+      setIsCreateModalOpen(true);
+      searchParams.delete('new');
+      setSearchParams(searchParams, { replace: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 

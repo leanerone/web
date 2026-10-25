@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
+import CommandPalette from '@/components/CommandPalette';
 import Dashboard from '@/pages/Dashboard';
 import Projects from '@/pages/Projects';
 import ProjectDetail from '@/pages/ProjectDetail';
@@ -109,6 +110,7 @@ function ProtectedApp() {
     <div className="flex h-screen bg-gray-50 text-gray-800">
       <Sidebar />
       <PageContent />
+      <CommandPalette />
       <Toaster />
     </div>
   );

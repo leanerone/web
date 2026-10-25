@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { User, LogOut, ShieldCheck, Sun, Moon, Bell, AlertCircle, Zap } from 'lucide-react';
+import { User, LogOut, ShieldCheck, Sun, Moon, Bell, AlertCircle, Zap, Search } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import useAppStore from '@/stores/appStore';
@@ -69,6 +69,16 @@ export default function Header({ title, subtitle }: HeaderProps) {
       </div>
 
       <div className="flex items-center gap-2">
+        <button
+          onClick={() => window.dispatchEvent(new Event('cim:open-palette'))}
+          className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-2.5 py-1.5 text-xs text-gray-400 transition-colors hover:border-gray-300 hover:text-gray-500"
+          title="全局搜索 (Ctrl+K)"
+        >
+          <Search className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">搜索</span>
+          <kbd className="hidden rounded border border-gray-200 bg-white px-1 text-[10px] md:inline">Ctrl K</kbd>
+        </button>
+
         <button
           onClick={toggleTheme}
           className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-accent-600"
