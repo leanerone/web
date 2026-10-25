@@ -1,108 +1,74 @@
 import { create } from 'zustand';
-import type { Project, Task, Equipment, Requirement, Report, DashboardStats } from '@/types';
+import type { Project, Equipment } from '@/types';
+
+export type Theme = 'classic' | 'modern';
+
+const THEME_KEY = 'cim-theme';
+const SIDEBAR_KEY = 'cim-sidebar-collapsed';
+
+function initialTheme(): Theme {
+  const saved = localStorage.getItem(THEME_KEY);
+  return saved === 'modern' ? 'modern' : 'classic';
+}
+
+/** 把主题应用到 <html>（CSS 变量切换的开关） */
+export function applyTheme(theme: Theme) {
+  document.documentElement.classList.toggle('theme-classic', theme === 'classic');
+}
 
 interface AppState {
+  /** classic = 经典亮色侧栏 + 青色主色；modern = 深色侧栏 + 靛蓝主色 */
+  theme: Theme;
   sidebarCollapsed: boolean;
-  currentPage: string;
-  
+
   projects: Project[];
-  tasks: Task[];
   equipment: Equipment[];
-  requirements: Requirement[];
-  reports: Report[];
-  stats: DashboardStats | null;
-  
+
+  setTheme: (theme: Theme) => void;
+  toggleTheme: () => void;
   setSidebarCollapsed: (collapsed: boolean) => void;
-  setCurrentPage: (page: string) => void;
-  
+
   setProjects: (projects: Project[]) => void;
   addProject: (project: Project) => void;
   updateProject: (project: Project) => void;
   deleteProject: (id: number) => void;
-  
-  setTasks: (tasks: Task[]) => void;
-  addTask: (task: Task) => void;
-  updateTask: (task: Task) => void;
-  deleteTask: (id: number) => void;
-  
+
   setEquipment: (equipment: Equipment[]) => void;
-  addEquipment: (item: Equipment) => void;
-  updateEquipment: (item: Equipment) => void;
-  deleteEquipment: (id: number) => void;
-  
-  setRequirements: (requirements: Requirement[]) => void;
-  addRequirement: (req: Requirement) => void;
-  updateRequirement: (req: Requirement) => void;
-  deleteRequirement: (id: number) => void;
-  
-  setReports: (reports: Report[]) => void;
-  addReport: (report: Report) => void;
-  updateReport: (report: Report) => void;
-  deleteReport: (id: number) => void;
-  
-  setStats: (stats: DashboardStats) => void;
 }
 
-const useAppStore = create<AppState>((set) => ({
-  sidebarCollapsed: false,
-  currentPage: 'dashboard',
-  
+const useAppStore = create<AppState>((set, get) => ({
+  theme: initialTheme(),
+  sidebarCollapsed: localStorage.getItem(SIDEBAR_KEY) === '1',
+
   projects: [],
-  tasks: [],
   equipment: [],
-  requirements: [],
-  reports: [],
-  stats: null,
-  
-  setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-  setCurrentPage: (page) => set({ currentPage: page }),
-  
+
+  setTheme: (theme) => {
+    set({ theme });
+    localStorage.setItem(THEME_KEY, theme);
+    applyTheme(theme);
+  },
+
+  toggleTheme: () => {
+    const next: Theme = get().theme === 'classic' ? 'modern' : 'classic';
+    get().setTheme(next);
+  },
+
+  setSidebarCollapsed: (collapsed) => {
+    set({ sidebarCollapsed: collapsed });
+    localStorage.setItem(SIDEBAR_KEY, collapsed ? '1' : '0');
+  },
+
   setProjects: (projects) => set({ projects }),
   addProject: (project) => set((state) => ({ projects: [...state.projects, project] })),
-  updateProject: (project) => set((state) => ({ 
-    projects: state.projects.map(p => p.id === project.id ? project : p) 
+  updateProject: (project) => set((state) => ({
+    projects: state.projects.map((p) => (p.id === project.id ? project : p)),
   })),
-  deleteProject: (id) => set((state) => ({ 
-    projects: state.projects.filter(p => p.id !== id) 
+  deleteProject: (id) => set((state) => ({
+    projects: state.projects.filter((p) => p.id !== id),
   })),
-  
-  setTasks: (tasks) => set({ tasks }),
-  addTask: (task) => set((state) => ({ tasks: [...state.tasks, task] })),
-  updateTask: (task) => set((state) => ({ 
-    tasks: state.tasks.map(t => t.id === task.id ? task : t) 
-  })),
-  deleteTask: (id) => set((state) => ({ 
-    tasks: state.tasks.filter(t => t.id !== id) 
-  })),
-  
+
   setEquipment: (equipment) => set({ equipment }),
-  addEquipment: (item) => set((state) => ({ equipment: [...state.equipment, item] })),
-  updateEquipment: (item) => set((state) => ({ 
-    equipment: state.equipment.map(e => e.id === item.id ? item : e) 
-  })),
-  deleteEquipment: (id) => set((state) => ({ 
-    equipment: state.equipment.filter(e => e.id !== id) 
-  })),
-  
-  setRequirements: (requirements) => set({ requirements }),
-  addRequirement: (req) => set((state) => ({ requirements: [...state.requirements, req] })),
-  updateRequirement: (req) => set((state) => ({ 
-    requirements: state.requirements.map(r => r.id === req.id ? req : r) 
-  })),
-  deleteRequirement: (id) => set((state) => ({ 
-    requirements: state.requirements.filter(r => r.id !== id) 
-  })),
-  
-  setReports: (reports) => set({ reports }),
-  addReport: (report) => set((state) => ({ reports: [...state.reports, report] })),
-  updateReport: (report) => set((state) => ({ 
-    reports: state.reports.map(r => r.id === report.id ? report : r) 
-  })),
-  deleteReport: (id) => set((state) => ({ 
-    reports: state.reports.filter(r => r.id !== id) 
-  })),
-  
-  setStats: (stats) => set({ stats }),
 }));
 
 export default useAppStore;

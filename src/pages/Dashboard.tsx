@@ -3,24 +3,31 @@ import {
   FolderKanban,
   Cpu,
   ClipboardList,
-  CheckCircle2,
-  Clock,
-  AlertTriangle,
+  Briefcase,
   ArrowRight,
-  Bot,
-  RefreshCw,
-  Zap,
-  Target,
   Calendar,
+  Clock,
+  RefreshCw,
+  Target,
+  Zap,
+  CheckCircle2,
+  Sparkles,
+  ListTodo,
+  AlertCircle,
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import Card from '@/components/Card';
 import StatsCard from '@/components/StatsCard';
 import Button from '@/components/Button';
-import { useNavigate } from 'react-router-dom';
+import Badge, { RequirementStatusBadge, PriorityBadge } from '@/components/ui/Badge';
+import EmptyState from '@/components/ui/EmptyState';
+import { StatsSkeleton, Skeleton } from '@/components/ui/Skeleton';
+import { toast } from '@/components/ui/Toast';
+import { priorityScoreStyle } from '@/constants/status';
 import { dashboardAPI, projectAPI, requirementAPI, workItemsAPI } from '@/services/api';
 import type { DashboardStats, Project, Requirement, WorkStats, WorkItem } from '@/types';
 
-const REFRESH_INTERVAL = 60_000; // 60秒自动刷新
+const REFRESH_INTERVAL = 60_000;
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -28,10 +35,11 @@ export default function Dashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [workStats, setWorkStats] = useState<WorkStats | null>(null);
-  const [todayItems, setTodayItems] = useState<WorkItem[]>([]);
+  const [todoItems, setTodoItems] = useState<WorkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const fetchData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
@@ -49,7 +57,7 @@ export default function Dashboard() {
       if (projectsRes.status === 'fulfilled' && projectsRes.value.success) setProjects(projectsRes.value.data);
       if (reqRes.status === 'fulfilled' && reqRes.value.success) setRequirements(reqRes.value.data);
       if (workStatsRes.status === 'fulfilled' && workStatsRes.value.success) setWorkStats(workStatsRes.value.data);
-      if (itemsRes.status === 'fulfilled' && itemsRes.value.success) setTodayItems(itemsRes.value.data);
+      if (itemsRes.status === 'fulfilled' && itemsRes.value.success) setTodoItems(itemsRes.value.data);
       setLastUpdated(new Date());
     } catch (err) {
       console.error('Failed to fetch dashboard data:', err);
@@ -65,321 +73,320 @@ export default function Dashboard() {
     return () => clearInterval(timer);
   }, [fetchData]);
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      dev: 'bg-blue-50 text-blue-600',
-      testing: 'bg-orange-50 text-orange-600',
-      deploying: 'bg-purple-50 text-purple-600',
-      completed: 'bg-green-50 text-green-600',
-      active: 'bg-green-50 text-green-600',
-      online: 'bg-green-50 text-green-600',
-      offline: 'bg-red-50 text-red-600',
-      maintenance: 'bg-orange-50 text-orange-600',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-500';
+  /** 真实勾选完成/恢复 */
+  const toggleItem = async (item: WorkItem) => {
+    const nextStatus = item.status === 'completed' ? 'pending' : 'completed';
+    setTogglingId(item.id);
+    try {
+      const res = await workItemsAPI.update(item.id, { status: nextStatus });
+      if (res.success) {
+        setTodoItems((prev) =>
+          nextStatus === 'completed' ? prev.filter((i) => i.id !== item.id) : prev.map((i) => (i.id === item.id ? res.data : i))
+        );
+        toast.success(nextStatus === 'completed' ? '已完成，干得漂亮' : '已恢复为待处理');
+        if (nextStatus === 'completed') fetchData(true);
+      } else {
+        toast.error(res.message || '状态更新失败');
+      }
+    } catch {
+      toast.error('状态更新失败，请检查后端服务');
+    } finally {
+      setTogglingId(null);
+    }
   };
 
-  const getPriorityColor = (priority: string) => {
-    const colors: Record<string, string> = {
-      low: 'bg-gray-100 text-gray-500',
-      medium: 'bg-blue-50 text-blue-600',
-      high: 'bg-orange-50 text-orange-600',
-      critical: 'bg-red-50 text-red-600',
-    };
-    return colors[priority] || 'bg-gray-100 text-gray-500';
-  };
+  // 未完成的工作项 = 待办；已完成的不占今日待办
+  const openItems = todoItems.filter((i) => i.status !== 'completed');
+  const pendingRequirements = requirements.filter((r) => r.status !== 'completed');
+  const activeProjects = projects.filter((p) => p.status === 'active');
 
-  const reqStatusLabels: Record<string, string> = {
-    dev: '开发中', testing: '测试中', deploying: '上线中', completed: '已完成',
-    pending: '待处理', in_progress: '进行中', rejected: '已拒绝',
-  };
+  const today = new Date().toISOString().split('T')[0];
+  const dueSoon = openItems
+    .filter((i) => i.due_date)
+    .sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''))
+    .slice(0, 5);
 
   if (loading) {
     return (
-      <div className="p-6 space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="bg-gray-100 border border-gray-200 rounded-xl p-5 animate-pulse h-24" />
-          ))}
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-gray-100 border border-gray-200 rounded-xl p-5 animate-pulse h-64" />
-          <div className="bg-gray-100 border border-gray-200 rounded-xl p-5 animate-pulse h-64" />
+      <div className="animate-fade-in space-y-6">
+        <StatsSkeleton />
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <Skeleton className="h-80 lg:col-span-2" />
+          <Skeleton className="h-80" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="animate-fade-in p-6">
-      {/* 顶部刷新栏 */}
-      <div className="flex items-center justify-between mb-6">
-        <p className="text-sm text-gray-500 flex items-center gap-2">
-          <Clock className="w-4 h-4" />
-          {lastUpdated ? `最后更新: ${lastUpdated.toLocaleTimeString()} (每60秒自动刷新)` : '加载中...'}
-        </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => fetchData(true)}
-          disabled={refreshing}
-        >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-          {refreshing ? '刷新中...' : '手动刷新'}
+    <div className="animate-fade-in space-y-6">
+      {/* 顶部问候 + 刷新 */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">
+            {new Date().getHours() < 12 ? '早上好' : new Date().getHours() < 18 ? '下午好' : '晚上好'}，
+            今天有 {openItems.length} 项工作待处理
+          </h2>
+          <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-400">
+            <Clock className="h-3 w-3" />
+            {lastUpdated ? `最后更新 ${lastUpdated.toLocaleTimeString()} · 每 60 秒自动刷新` : '加载中...'}
+          </p>
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => fetchData(true)} disabled={refreshing}>
+          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+          刷新
         </Button>
       </div>
 
-      {/* 统计卡片 - 全局资源 */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      {/* 全局统计 */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard
-          title="项目总数"
-          value={stats?.total_projects ?? 0}
-          icon={<FolderKanban className="w-6 h-6" />}
-          color="cyan"
+          title="进行中项目"
+          value={stats?.active_projects ?? activeProjects.length}
+          icon={<FolderKanban className="h-5 w-5" />}
+          color="accent"
+          onClick={() => navigate('/projects')}
         />
         <StatsCard
-          title="机台数量"
+          title="机台总数"
           value={stats?.total_equipment ?? 0}
-          icon={<Cpu className="w-6 h-6" />}
+          icon={<Cpu className="h-5 w-5" />}
           color="green"
+          onClick={() => navigate('/equipment')}
         />
         <StatsCard
           title="待处理需求"
-          value={stats?.pending_requirements ?? 0}
-          icon={<ClipboardList className="w-6 h-6" />}
+          value={stats?.pending_requirements ?? pendingRequirements.length}
+          icon={<ClipboardList className="h-5 w-5" />}
           color="orange"
+          onClick={() => navigate('/requirements')}
         />
         <StatsCard
-          title="工作项总数"
-          value={workStats?.total ?? 0}
-          icon={<CheckCircle2 className="w-6 h-6" />}
+          title="本周完成率"
+          value={`${stats?.completion_rate ?? 0}%`}
+          icon={<Target className="h-5 w-5" />}
           color="purple"
         />
       </div>
 
-      {/* 工作统计卡片 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <div className="bg-gradient-to-br from-yellow-50 to-orange-50 border border-orange-200 rounded-xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-orange-600 text-sm">待处理工作</p>
-              <h3 className="text-2xl font-bold mt-1 text-gray-800">{workStats?.pending ?? 0}</h3>
-            </div>
-            <Clock className="w-8 h-8 text-orange-400" />
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-blue-50 to-cyan-50 border border-blue-200 rounded-xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-blue-600 text-sm">进行中</p>
-              <h3 className="text-2xl font-bold mt-1 text-gray-800">{workStats?.in_progress ?? 0}</h3>
-            </div>
-            <Zap className="w-8 h-8 text-blue-400" />
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-green-600 text-sm">已完成</p>
-              <h3 className="text-2xl font-bold mt-1 text-gray-800">{workStats?.completed ?? 0}</h3>
-            </div>
-            <CheckCircle2 className="w-8 h-8 text-green-400" />
-          </div>
-        </div>
-        <div className="bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-purple-600 text-sm">本周完成率</p>
-              <h3 className="text-2xl font-bold mt-1 text-gray-800">{stats?.completion_rate ?? 0}%</h3>
-            </div>
-            <Target className="w-8 h-8 text-purple-400" />
-          </div>
-        </div>
-      </div>
-
-      {/* 中部三栏 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        {/* 今日高优先级工作 */}
+      {/* 中部：今日待办 + 右侧栏 */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* 今日待办 */}
         <Card
-          title="今日高优先级工作"
+          title="今日待办"
           className="lg:col-span-2"
           footer={
             <Button variant="ghost" className="w-full justify-center" onClick={() => navigate('/work-items')}>
-              查看全部工作项 <ArrowRight className="w-4 h-4" />
+              进入工作台 <ArrowRight className="h-4 w-4" />
             </Button>
           }
         >
-          <div className="space-y-3">
-            {todayItems.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">暂无工作项，请先创建</div>
-            ) : (
-              todayItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition cursor-pointer"
-                  onClick={() => navigate('/work-items')}
-                >
-                  <div className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${
-                    item.urgency === 'high' ? 'bg-red-500' :
-                    item.urgency === 'medium' ? 'bg-yellow-500' : 'bg-gray-400'
-                  }`} />
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-sm font-medium text-gray-800 truncate">{item.title}</h4>
+          {openItems.length === 0 ? (
+            <EmptyState
+              icon={ListTodo}
+              title="太棒了，待办清空了"
+              description="去工作台规划下一批工作项"
+              action={<Button variant="secondary" onClick={() => navigate('/work-items')}>新建工作项</Button>}
+            />
+          ) : (
+            <ul className="-mx-2 divide-y divide-gray-50">
+              {openItems.map((item) => {
+                const score = priorityScoreStyle(item.priority_score);
+                const overdue = item.due_date && item.due_date < today;
+                return (
+                  <li key={item.id} className="group flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-gray-50">
+                    <button
+                      onClick={() => toggleItem(item)}
+                      disabled={togglingId === item.id}
+                      className="flex h-[18px] w-[18px] flex-shrink-0 items-center justify-center rounded-full border-2 border-gray-300 text-transparent transition-colors hover:border-emerald-500 hover:text-emerald-500 disabled:opacity-50"
+                      title="标记完成"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                    </button>
+                    <div className="min-w-0 flex-1 cursor-pointer" onClick={() => navigate('/work-items')}>
+                      <p className="truncate text-sm font-medium text-gray-800">{item.title}</p>
+                      {item.category && (
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-gray-400">
+                          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: item.category.color || '#9CA3AF' }} />
+                          {item.category.name}
+                        </p>
+                      )}
+                    </div>
                     {item.due_date && (
-                      <div className="flex items-center gap-1 mt-1 text-xs text-gray-500">
-                        <Calendar className="w-3 h-3" />
-                        <span>截止: {item.due_date}</span>
-                      </div>
+                      <Badge tone={overdue ? 'red' : 'gray'} className="hidden sm:inline-flex">
+                        {overdue && <AlertCircle className="h-3 w-3" />}
+                        {overdue ? '已逾期' : ''} {item.due_date.slice(5)}
+                      </Badge>
                     )}
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="text-xs text-gray-500">优先级</div>
-                    <div className="text-lg font-bold text-cyan-600">{item.priority_score.toFixed(1)}</div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+                    <Badge tone={score.tone} className="tabular-nums">{score.label}</Badge>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </Card>
 
-        {/* 待处理需求 */}
-        <Card
-          title="待处理需求"
-          footer={
-            <Button variant="ghost" className="w-full justify-center" onClick={() => navigate('/requirements')}>
-              查看全部需求 <ArrowRight className="w-4 h-4" />
-            </Button>
-          }
-        >
-          <div className="space-y-3">
-            {requirements.filter((r) => r.status !== 'completed').slice(0, 5).map((req) => (
-              <div
-                key={req.id}
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition cursor-pointer"
-                onClick={() => navigate(`/requirements/${req.id}`)}
-              >
-                <AlertTriangle className={`w-4 h-4 flex-shrink-0 ${req.priority === 'high' || req.priority === 'critical' ? 'text-orange-600' : 'text-gray-400'}`} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-800 truncate">{req.title}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${getStatusColor(req.status)}`}>
-                      {reqStatusLabels[req.status] || req.status}
-                    </span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${getPriorityColor(req.priority)}`}>
-                      {req.priority === 'high' ? '高' : req.priority === 'critical' ? '紧急' : req.priority === 'medium' ? '中' : '低'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {requirements.filter((r) => r.status !== 'completed').length === 0 && (
-              <div className="text-center py-8 text-gray-500">暂无待处理需求</div>
+        {/* 右侧：近期截止 + 需求动态 */}
+        <div className="space-y-6">
+          <Card title="近期截止">
+            {dueSoon.length === 0 ? (
+              <p className="py-6 text-center text-sm text-gray-400">暂无带截止日期的待办</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {dueSoon.map((item) => {
+                  const overdue = (item.due_date || '') < today;
+                  return (
+                    <li key={item.id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="min-w-0 flex-1 truncate text-gray-700">{item.title}</span>
+                      <span className={`flex-shrink-0 text-xs tabular-nums ${overdue ? 'font-medium text-red-600' : 'text-gray-400'}`}>
+                        {item.due_date?.slice(5)}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
-          </div>
-        </Card>
+          </Card>
+
+          <Card
+            title="需求动态"
+            footer={
+              <Button variant="ghost" className="w-full justify-center" onClick={() => navigate('/requirements')}>
+                查看全部需求 <ArrowRight className="h-4 w-4" />
+              </Button>
+            }
+          >
+            {pendingRequirements.length === 0 ? (
+              <p className="py-6 text-center text-sm text-gray-400">暂无待处理需求</p>
+            ) : (
+              <ul className="space-y-2.5">
+                {pendingRequirements.slice(0, 5).map((req) => (
+                  <li
+                    key={req.id}
+                    className="cursor-pointer rounded-lg p-2 transition-colors hover:bg-gray-50"
+                    onClick={() => navigate(`/requirements/${req.id}`)}
+                  >
+                    <p className="truncate text-sm text-gray-700">{req.title}</p>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <RequirementStatusBadge status={req.status} />
+                      <PriorityBadge value={req.priority} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
       </div>
 
-      {/* 底部三栏 */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* 进行中项目 */}
+      {/* 底部：项目进度 / 类别分布 / 快捷入口 */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card
-          title="进行中的项目"
+          title="项目进度"
           footer={
             <Button variant="ghost" className="w-full justify-center" onClick={() => navigate('/projects')}>
-              查看全部项目 <ArrowRight className="w-4 h-4" />
+              全部项目 <ArrowRight className="h-4 w-4" />
             </Button>
           }
         >
-          <div className="space-y-4">
-            {projects.filter((p) => p.status === 'active').slice(0, 4).map((project) => (
-              <div
-                key={project.id}
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition cursor-pointer"
-                onClick={() => navigate(`/projects/${project.id}`)}
-              >
-                <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                  <FolderKanban className="w-5 h-5 text-blue-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">{project.name}</p>
-                  <span className="text-xs text-gray-500">{project.progress}%</span>
-                </div>
-                <div className="w-20 h-2 bg-gray-200 rounded-full overflow-hidden flex-shrink-0">
-                  <div
-                    className="h-full bg-gradient-to-r from-cyan-500 to-blue-600 transition-all duration-500"
-                    style={{ width: `${project.progress}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-            {projects.filter((p) => p.status === 'active').length === 0 && (
-              <div className="text-center py-8 text-gray-500">暂无进行中项目</div>
-            )}
-          </div>
-        </Card>
-
-        {/* 工作类别分布 */}
-        <Card title="工作类别分布">
-          <div className="space-y-3">
-            {workStats?.categories.map((cat) => {
-              const maxCount = Math.max(...workStats.categories.map((c) => c.count), 1);
-              const percentage = (cat.count / maxCount) * 100;
-              return (
-                <div key={cat.id}>
-                  <div className="flex items-center justify-between text-sm mb-1">
-                    <span className="text-gray-700 flex items-center gap-1">
-                      {cat.icon} {cat.name}
-                    </span>
-                    <span className="text-gray-500 font-medium">{cat.count}</span>
+          {activeProjects.length === 0 ? (
+            <p className="py-6 text-center text-sm text-gray-400">暂无进行中项目</p>
+          ) : (
+            <ul className="space-y-3">
+              {activeProjects.slice(0, 4).map((project) => (
+                <li
+                  key={project.id}
+                  className="cursor-pointer rounded-lg p-2 transition-colors hover:bg-gray-50"
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                >
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-gray-700">{project.name}</p>
+                    <span className="text-xs tabular-nums text-gray-400">{project.progress}%</span>
                   </div>
-                  <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                  <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
                     <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${percentage}%`, backgroundColor: cat.color || '#6B7280' }}
+                      className="h-full rounded-full bg-accent-500 transition-all duration-500"
+                      style={{ width: `${project.progress}%` }}
                     />
                   </div>
-                </div>
-              );
-            })}
-            {(!workStats?.categories || workStats.categories.length === 0) && (
-              <div className="text-center py-8 text-gray-500 text-sm">暂无工作类别数据</div>
-            )}
-          </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
 
-        {/* AI智能提示 */}
-        <Card title="AI智能提示">
-          <div className="space-y-3">
-            <div className="flex items-start gap-3 p-3 bg-cyan-50 rounded-lg border border-cyan-200">
-              <Bot className="w-5 h-5 text-cyan-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <p className="text-xs text-cyan-600 font-medium mb-1">AI助手建议</p>
-                <ul className="space-y-2">
-                  <li className="text-sm text-gray-700 flex items-start gap-2">
-                    <ArrowRight className="w-3 h-3 text-cyan-600 flex-shrink-0 mt-1" />
-                    当前有 {requirements.filter((r) => r.status !== 'completed').length} 个待处理需求
+        <Card title="工作类别分布">
+          {(!workStats?.categories || workStats.categories.length === 0) ? (
+            <p className="py-6 text-center text-sm text-gray-400">暂无类别数据</p>
+          ) : (
+            <ul className="space-y-3">
+              {workStats.categories.map((cat) => {
+                const maxCount = Math.max(...workStats.categories.map((c) => c.count), 1);
+                return (
+                  <li key={cat.id}>
+                    <div className="mb-1 flex items-center justify-between text-sm">
+                      <span className="flex items-center gap-1.5 text-gray-600">
+                        <span>{cat.icon}</span> {cat.name}
+                      </span>
+                      <span className="font-medium tabular-nums text-gray-400">{cat.count}</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-gray-100">
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{ width: `${(cat.count / maxCount) * 100}%`, backgroundColor: cat.color || '#6B7280' }}
+                      />
+                    </div>
                   </li>
-                  <li className="text-sm text-gray-700 flex items-start gap-2">
-                    <ArrowRight className="w-3 h-3 text-cyan-600 flex-shrink-0 mt-1" />
-                    {workStats?.pending ?? 0} 个工作项待处理，{workStats?.in_progress ?? 0} 个进行中
-                  </li>
-                  <li className="text-sm text-gray-700 flex items-start gap-2">
-                    <ArrowRight className="w-3 h-3 text-cyan-600 flex-shrink-0 mt-1" />
-                    本周完成率 {stats?.completion_rate ?? 0}%
-                  </li>
-                </ul>
-              </div>
-            </div>
-            <Button
-              variant="ghost"
-              className="w-full justify-start text-cyan-600 hover:text-cyan-500"
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="快捷入口">
+          <div className="grid grid-cols-2 gap-2.5">
+            <QuickAction
+              icon={<Zap className="h-4 w-4" />}
+              label="AI 智能排序"
+              tone="bg-accent-50 text-accent-600"
               onClick={() => navigate('/ai-assistant')}
-            >
-              获取更多AI建议
-            </Button>
+            />
+            <QuickAction
+              icon={<Sparkles className="h-4 w-4" />}
+              label="AI 生成周报"
+              tone="bg-purple-50 text-purple-600"
+              onClick={() => navigate('/weekly-report')}
+            />
+            <QuickAction
+              icon={<Briefcase className="h-4 w-4" />}
+              label="新建工作项"
+              tone="bg-blue-50 text-blue-600"
+              onClick={() => navigate('/work-items')}
+            />
+            <QuickAction
+              icon={<Calendar className="h-4 w-4" />}
+              label="个人资料"
+              tone="bg-amber-50 text-amber-600"
+              onClick={() => navigate('/profile')}
+            />
           </div>
+          <p className="mt-4 border-t border-gray-50 pt-3 text-xs leading-relaxed text-gray-400">
+            提示：AI 相关功能需先在「设置 → AI 配置」中完成配置并测试连接。
+          </p>
         </Card>
       </div>
     </div>
+  );
+}
+
+function QuickAction({ icon, label, tone, onClick }: { icon: React.ReactNode; label: string; tone: string; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex flex-col items-start gap-2 rounded-lg border border-gray-100 p-3 text-left transition-colors hover:border-gray-200 hover:bg-gray-50"
+    >
+      <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${tone}`}>{icon}</span>
+      <span className="text-xs font-medium text-gray-600">{label}</span>
+    </button>
   );
 }

@@ -41,7 +41,6 @@ export default function Profile() {
     notes_user: '',
     notes_password: '',
   });
-  const [loading, setLoading] = useState(false);
   const [notesUrlInput, setNotesUrlInput] = useState('');
   const [parsedNotesUrl, setParsedNotesUrl] = useState<{
     title: string;
@@ -151,11 +150,11 @@ export default function Profile() {
 
   return (
     <div className="animate-fade-in">
-      <div className="p-6">
+      <div>
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-1">
             <div className="flex flex-col items-center">
-              <div className="w-24 h-24 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center mb-4">
+              <div className="w-24 h-24 rounded-full brand-gradient flex items-center justify-center mb-4">
                 <span className="text-3xl font-bold text-white">
                   {user?.display_name?.charAt(0).toUpperCase() || <User className="w-12 h-12 text-white" />}
                 </span>
@@ -163,7 +162,7 @@ export default function Profile() {
               <h2 className="text-xl font-bold text-gray-800">{user?.display_name || '未登录'}</h2>
               <p className="text-sm text-gray-500">{user ? getRoleLabel(user.role) : '-'}</p>
               <div className="flex items-center gap-2 mt-2">
-                <span className="px-3 py-1 bg-cyan-50 text-cyan-600 rounded-full text-xs font-medium">
+                <span className="px-3 py-1 bg-accent-50 text-accent-600 rounded-full text-xs font-medium">
                   {user?.team || '半导体CIM团队'}
                 </span>
                 <span className="px-3 py-1 bg-green-50 text-green-600 rounded-full text-xs font-medium flex items-center gap-1">
@@ -349,7 +348,7 @@ export default function Profile() {
                     <tr key={doc.id} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
-                          <FileDown className="w-4 h-4 text-cyan-600" />
+                          <FileDown className="w-4 h-4 text-accent-600" />
                           <span className="text-gray-800">{doc.title}</span>
                         </div>
                       </td>
@@ -387,7 +386,7 @@ export default function Profile() {
             <div className="space-y-4">
               <div className="p-4 bg-gray-50 rounded-lg flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <Bell className="w-5 h-5 text-cyan-600" />
+                  <Bell className="w-5 h-5 text-accent-600" />
                   <div>
                     <p className="text-gray-800 font-medium">项目更新通知</p>
                     <p className="text-sm text-gray-500">当项目状态变更时接收通知</p>
@@ -454,7 +453,7 @@ export default function Profile() {
                 type="text"
                 value={notesSettings.notes_server_url}
                 onChange={(e) => setNotesSettings({ ...notesSettings, notes_server_url: e.target.value })}
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
                 placeholder="http://your-notes-server"
               />
             </div>
@@ -465,7 +464,7 @@ export default function Profile() {
                   type="text"
                   value={notesSettings.notes_user}
                   onChange={(e) => setNotesSettings({ ...notesSettings, notes_user: e.target.value })}
-                  className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                  className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
                   placeholder="Notes用户名"
                 />
               </div>
@@ -475,7 +474,7 @@ export default function Profile() {
                   type="password"
                   value={notesSettings.notes_password}
                   onChange={(e) => setNotesSettings({ ...notesSettings, notes_password: e.target.value })}
-                  className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                  className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
                   placeholder="Notes密码"
                 />
               </div>
@@ -486,19 +485,19 @@ export default function Profile() {
             <label className="block text-sm font-medium text-gray-700 mb-2">选择要同步的文档类型</label>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <label className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
-                <input type="checkbox" defaultChecked className="rounded text-cyan-600 focus:ring-cyan-500" />
+                <input type="checkbox" defaultChecked className="rounded text-accent-600 focus:ring-accent-500" />
                 <span className="text-sm text-gray-700">项目文档</span>
               </label>
               <label className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
-                <input type="checkbox" defaultChecked className="rounded text-cyan-600 focus:ring-cyan-500" />
+                <input type="checkbox" defaultChecked className="rounded text-accent-600 focus:ring-accent-500" />
                 <span className="text-sm text-gray-700">需求文档</span>
               </label>
               <label className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
-                <input type="checkbox" className="rounded text-cyan-600 focus:ring-cyan-500" />
+                <input type="checkbox" className="rounded text-accent-600 focus:ring-accent-500" />
                 <span className="text-sm text-gray-700">技术文档</span>
               </label>
               <label className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100">
-                <input type="checkbox" className="rounded text-cyan-600 focus:ring-cyan-500" />
+                <input type="checkbox" className="rounded text-accent-600 focus:ring-accent-500" />
                 <span className="text-sm text-gray-700">会议记录</span>
               </label>
             </div>
@@ -529,7 +528,7 @@ export default function Profile() {
                 setNotesUrlInput(e.target.value);
                 setParsedNotesUrl(null);
               }}
-              className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500 font-mono text-sm"
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500 font-mono text-sm"
               rows={6}
               placeholder="粘贴Notes URL，例如：&#10;MES ProjectDatabaseV2 - 【EAP Design Doc】2025080078...&#10;&lt;NDL&gt;&#10;&lt;REPLICA 4825766C:0028F9A0&gt;&#10;&lt;VIEW OFBC418B5D:6AFFDB0B-ON48257F47:000AD1B2&gt;&#10;&lt;NOTE OF9D767B94:10B9886C-ON48258CF2:0003E294&gt;&#10;&lt;/NDL&gt;"
             />

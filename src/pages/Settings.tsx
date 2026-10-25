@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
-  Settings,
   Bot,
   Database,
   Save,
@@ -9,19 +8,33 @@ import {
   AlertTriangle,
   Key,
   Globe,
+  SlidersHorizontal,
 } from 'lucide-react';
-import Card from '@/components/Card';
 import Button from '@/components/Button';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { toast } from '@/components/ui/Toast';
 import { settingsAPI } from '@/services/api';
 import type { AISettings, NotesSettings } from '@/types';
 
+const inputCls =
+  'w-full rounded-lg border border-gray-300 bg-gray-50 px-3.5 py-2 text-sm text-gray-800 placeholder-gray-400 transition-colors focus:border-accent-500 focus:bg-white focus:outline-none';
+const labelCls = 'mb-1.5 flex items-center gap-1.5 text-sm font-medium text-gray-700';
+const hintCls = 'mt-1 text-xs text-gray-400';
+
+type Tab = 'general' | 'ai' | 'notes';
+
 export default function SystemSettings() {
-  const [activeTab, setActiveTab] = useState<'ai' | 'notes' | 'general'>('ai');
+  const [activeTab, setActiveTab] = useState<Tab>('general');
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  // AI 连接测试状态
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string; reply?: string; model?: string; elapsed?: number } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    message: string;
+    reply?: string;
+    model?: string;
+    elapsed?: number;
+  } | null>(null);
 
   const [aiSettings, setAiSettings] = useState<AISettings>({
     openai_api_key: '',
@@ -39,49 +52,49 @@ export default function SystemSettings() {
     system_name: 'CIM Work Manager',
   });
 
-  useEffect(() => {
-    fetchSettings();
-  }, [activeTab]);
-
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
+    setLoading(true);
     try {
       if (activeTab === 'ai') {
         const res = await settingsAPI.getAISettings();
-        if (res.success) {
-          setAiSettings(res.data);
-        }
+        if (res.success) setAiSettings(res.data);
       } else if (activeTab === 'notes') {
         const res = await settingsAPI.getNotesSettings();
-        if (res.success) {
-          setNotesSettings(res.data);
-        }
-      } else if (activeTab === 'general') {
+        if (res.success) setNotesSettings(res.data);
+      } else {
         const res = await settingsAPI.get('system_name');
-        if (res.success && res.data) {
-          setGeneralSettings({ system_name: res.data.value });
-        }
+        if (res.success && res.data) setGeneralSettings({ system_name: res.data.value });
       }
-    } catch (err) {
-      console.error('Failed to fetch settings:', err);
+    } catch {
+      toast.error('设置加载失败，请检查后端服务');
+    } finally {
+      setLoading(false);
     }
-  };
+  }, [activeTab]);
+
+  useEffect(() => {
+    setTestResult(null);
+    fetchSettings();
+  }, [fetchSettings]);
 
   const handleSave = async () => {
     setSaving(true);
-    setSaveSuccess(false);
     try {
       if (activeTab === 'ai') {
-        await settingsAPI.saveAISettings(aiSettings);
+        const res = await settingsAPI.saveAISettings(aiSettings);
+        if (res.success) toast.success('AI 配置已保存');
+        else toast.error(res.message || '保存失败');
       } else if (activeTab === 'notes') {
-        await settingsAPI.saveNotesSettings(notesSettings);
-      } else if (activeTab === 'general') {
-        await settingsAPI.update('system_name', generalSettings.system_name, '系统名称', 'general');
+        const res = await settingsAPI.saveNotesSettings(notesSettings);
+        if (res.success) toast.success('Notes 配置已保存');
+        else toast.error(res.message || '保存失败');
+      } else {
+        const res = await settingsAPI.update('system_name', generalSettings.system_name, '系统名称', 'general');
+        if (res.success) toast.success('通用设置已保存');
+        else toast.error(res.message || '保存失败');
       }
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 2000);
-    } catch (err) {
-      console.error('Failed to save settings:', err);
-      alert('保存失败，请重试');
+    } catch {
+      toast.error('保存失败，请重试');
     } finally {
       setSaving(false);
     }
@@ -101,245 +114,204 @@ export default function SystemSettings() {
           elapsed: res.data.elapsed,
         });
       } else {
-        setTestResult({
-          success: false,
-          message: res.message || '测试请求失败，请检查后端服务是否运行',
-        });
+        setTestResult({ success: false, message: res.message || '测试请求失败，请检查后端服务是否运行' });
       }
-    } catch (err: any) {
-      setTestResult({
-        success: false,
-        message: err?.response?.data?.detail || err?.message || '测试请求异常，请检查后端服务和网络',
-      });
+    } catch (err) {
+      const detail =
+        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        (err as Error)?.message ||
+        '测试请求异常，请检查后端服务和网络';
+      setTestResult({ success: false, message: detail });
     } finally {
       setTesting(false);
     }
   };
 
-  const tabs = [
-    { id: 'general', label: '通用设置', icon: Settings },
-    { id: 'ai', label: 'AI配置', icon: Bot },
-    { id: 'notes', label: 'Notes配置', icon: Database },
-  ] as const;
+  const tabs: { id: Tab; label: string; description: string; icon: typeof Bot }[] = [
+    { id: 'general', label: '通用', description: '系统基础信息', icon: SlidersHorizontal },
+    { id: 'ai', label: 'AI 配置', description: '大模型 API 连接', icon: Bot },
+    { id: 'notes', label: 'Notes', description: 'HCL Notes 文档同步', icon: Database },
+  ];
+
+  const currentTab = tabs.find((t) => t.id === activeTab)!;
 
   return (
-    <div className="animate-fade-in p-6">
-      <Card className="mb-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-cyan-50 flex items-center justify-center">
-              <Settings className="w-5 h-5 text-cyan-600" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-gray-800">系统设置</h2>
-              <p className="text-sm text-gray-500">配置系统参数和集成选项</p>
-            </div>
+    <div className="animate-fade-in flex gap-8">
+      {/* 左侧分区导航 */}
+      <nav className="w-52 flex-shrink-0">
+        <p className="mb-2 px-3 text-[10px] font-medium uppercase tracking-wider text-gray-400">设置</p>
+        <ul className="space-y-0.5">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <li key={tab.id}>
+                <button
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                    active
+                      ? 'bg-gray-100 font-medium text-gray-900'
+                      : 'text-gray-500 hover:bg-gray-50 hover:text-gray-800'
+                  }`}
+                >
+                  <Icon className={`h-4 w-4 ${active ? 'text-accent-600' : 'text-gray-400'}`} />
+                  {tab.label}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+
+      {/* 右侧内容 */}
+      <div className="min-w-0 flex-1">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">{currentTab.label}</h2>
+            <p className="mt-0.5 text-xs text-gray-400">{currentTab.description}</p>
           </div>
-          <Button onClick={handleSave} loading={saving}>
-            {saveSuccess ? (
-              <>
-                <CheckCircle2 className="w-4 h-4" />
-                已保存
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4" />
-                保存设置
-              </>
-            )}
+          <Button onClick={handleSave} loading={saving} size="sm">
+            <Save className="h-4 w-4" /> 保存
           </Button>
         </div>
-      </Card>
 
-      <div className="flex gap-6">
-        <div className="w-56 flex-shrink-0">
-          <Card>
-            <nav className="space-y-1">
-              {tabs.map((tab) => {
-                const Icon = tab.icon;
-                return (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-all ${
-                      activeTab === tab.id
-                        ? 'bg-gradient-to-r from-cyan-500/10 to-blue-500/10 text-cyan-600 font-medium'
-                        : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
+        <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+          {loading ? (
+            <div className="space-y-4 p-6">
+              <Skeleton className="h-10 w-2/3" />
+              <Skeleton className="h-10 w-full" />
+              <Skeleton className="h-10 w-1/2" />
+            </div>
+          ) : activeTab === 'general' ? (
+            <div className="space-y-5 p-6">
+              <div className="max-w-md">
+                <label className={labelCls}>
+                  <Globe className="h-4 w-4 text-gray-400" /> 系统名称
+                </label>
+                <input
+                  type="text"
+                  value={generalSettings.system_name}
+                  onChange={(e) => setGeneralSettings({ ...generalSettings, system_name: e.target.value })}
+                  className={inputCls}
+                  placeholder="请输入系统名称"
+                />
+                <p className={hintCls}>显示在浏览器标题和侧栏顶部</p>
+              </div>
+            </div>
+          ) : activeTab === 'ai' ? (
+            <div className="space-y-5 p-6">
+              <div className="max-w-md">
+                <label className={labelCls}>
+                  <Key className="h-4 w-4 text-gray-400" /> API Key
+                </label>
+                <input
+                  type="password"
+                  value={aiSettings.openai_api_key}
+                  onChange={(e) => setAiSettings({ ...aiSettings, openai_api_key: e.target.value })}
+                  className={inputCls}
+                  placeholder="请输入 API Key"
+                />
+                <p className={hintCls}>用于访问大模型 API 的密钥，仅保存在本地后端</p>
+              </div>
+              <div className="max-w-md">
+                <label className={labelCls}>
+                  <Globe className="h-4 w-4 text-gray-400" /> API Base URL
+                </label>
+                <input
+                  type="text"
+                  value={aiSettings.openai_api_base}
+                  onChange={(e) => setAiSettings({ ...aiSettings, openai_api_base: e.target.value })}
+                  className={inputCls}
+                  placeholder="https://api.openai.com/v1"
+                />
+                <p className={hintCls}>支持 OpenAI 兼容的 API 服务</p>
+              </div>
+              <div className="max-w-md">
+                <label className={labelCls}>
+                  <Bot className="h-4 w-4 text-gray-400" /> 模型名称
+                </label>
+                <input
+                  type="text"
+                  value={aiSettings.ai_model}
+                  onChange={(e) => setAiSettings({ ...aiSettings, ai_model: e.target.value })}
+                  className={inputCls}
+                  placeholder="gpt-4o-mini"
+                />
+              </div>
+              <div className="border-t border-gray-100 pt-4">
+                <Button variant="secondary" size="sm" onClick={handleTestConnection} loading={testing}>
+                  <RefreshCw className="h-4 w-4" />
+                  {testing ? '测试中...' : '测试连接'}
+                </Button>
+                {testResult && (
+                  <div
+                    className={`mt-3 max-w-md rounded-lg border p-3 text-sm ${
+                      testResult.success
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                        : 'border-red-200 bg-red-50 text-red-700'
                     }`}
                   >
-                    <Icon className="w-5 h-5" />
-                    <span className="text-sm">{tab.label}</span>
-                  </button>
-                );
-              })}
-            </nav>
-          </Card>
-        </div>
-
-        <div className="flex-1">
-          {activeTab === 'general' && (
-            <Card>
-              <h3 className="text-lg font-semibold text-gray-800 mb-6">通用设置</h3>
-              <div className="space-y-6 max-w-xl">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Globe className="w-4 h-4 inline mr-2" />
-                    系统名称
-                  </label>
-                  <input
-                    type="text"
-                    value={generalSettings.system_name}
-                    onChange={(e) => setGeneralSettings({ ...generalSettings, system_name: e.target.value })}
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-                    placeholder="请输入系统名称"
-                  />
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {activeTab === 'ai' && (
-            <Card>
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">AI大模型配置</h3>
-              <p className="text-sm text-gray-500 mb-6">配置AI助手使用的大模型API连接信息</p>
-              
-              <div className="space-y-6 max-w-xl">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Key className="w-4 h-4 inline mr-2" />
-                    API Key
-                  </label>
-                  <input
-                    type="password"
-                    value={aiSettings.openai_api_key}
-                    onChange={(e) => setAiSettings({ ...aiSettings, openai_api_key: e.target.value })}
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-                    placeholder="请输入API Key"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">用于访问大模型API的密钥</p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Globe className="w-4 h-4 inline mr-2" />
-                    API Base URL
-                  </label>
-                  <input
-                    type="text"
-                    value={aiSettings.openai_api_base}
-                    onChange={(e) => setAiSettings({ ...aiSettings, openai_api_base: e.target.value })}
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-                    placeholder="https://api.openai.com/v1"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">API基础地址，支持OpenAI兼容的API服务</p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Bot className="w-4 h-4 inline mr-2" />
-                    模型名称
-                  </label>
-                  <input
-                    type="text"
-                    value={aiSettings.ai_model}
-                    onChange={(e) => setAiSettings({ ...aiSettings, ai_model: e.target.value })}
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-                    placeholder="gpt-4o-mini"
-                  />
-                  <p className="text-xs text-gray-400 mt-1">使用的大模型名称</p>
-                </div>
-
-                <div className="pt-4">
-                  <Button variant="secondary" onClick={handleTestConnection} loading={testing}>
-                    <RefreshCw className="w-4 h-4" />
-                    {testing ? '测试中...' : '测试连接'}
-                  </Button>
-                  {testResult && (
-                    <div className={`mt-3 p-3 rounded-lg border text-sm ${
-                      testResult.success
-                        ? 'bg-green-50 border-green-200 text-green-700'
-                        : 'bg-red-50 border-red-200 text-red-700'
-                    }`}>
-                      <div className="flex items-start gap-2">
-                        {testResult.success ? (
-                          <CheckCircle2 className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                        ) : (
-                          <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <div className="flex items-start gap-2">
+                      {testResult.success ? (
+                        <CheckCircle2 className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                      ) : (
+                        <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium">{testResult.success ? '连接成功' : '连接失败'}</p>
+                        <p className="mt-1 break-words text-xs">{testResult.message}</p>
+                        {testResult.reply && <p className="mt-1 text-xs text-gray-500">模型回复: {testResult.reply}</p>}
+                        {testResult.model && (
+                          <p className="mt-0.5 text-xs text-gray-400">
+                            模型: {testResult.model}
+                            {testResult.elapsed ? ` · 耗时 ${testResult.elapsed}s` : ''}
+                          </p>
                         )}
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium">{testResult.success ? '连接成功' : '连接失败'}</p>
-                          <p className="text-xs mt-1 break-words">{testResult.message}</p>
-                          {testResult.reply && (
-                            <p className="text-xs mt-1 text-gray-500">模型回复: {testResult.reply}</p>
-                          )}
-                          {testResult.model && (
-                            <p className="text-xs mt-0.5 text-gray-400">模型: {testResult.model}</p>
-                          )}
-                        </div>
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
-            </Card>
-          )}
-
-          {activeTab === 'notes' && (
-            <Card>
-              <h3 className="text-lg font-semibold text-gray-800 mb-2">HCL Notes配置</h3>
-              <p className="text-sm text-gray-500 mb-6">配置HCL Notes文档同步连接信息</p>
-              
-              <div className="space-y-6 max-w-xl">
+            </div>
+          ) : (
+            <div className="space-y-5 p-6">
+              <div className="max-w-md">
+                <label className={labelCls}>
+                  <Globe className="h-4 w-4 text-gray-400" /> Notes 服务器 URL
+                </label>
+                <input
+                  type="text"
+                  value={notesSettings.notes_server_url}
+                  onChange={(e) => setNotesSettings({ ...notesSettings, notes_server_url: e.target.value })}
+                  className={inputCls}
+                  placeholder="http://your-notes-server"
+                />
+                <p className={hintCls}>HCL Notes 服务器的 API 地址</p>
+              </div>
+              <div className="grid max-w-md grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    <Globe className="w-4 h-4 inline mr-2" />
-                    Notes服务器URL
-                  </label>
+                  <label className={labelCls}>用户名</label>
                   <input
                     type="text"
-                    value={notesSettings.notes_server_url}
-                    onChange={(e) => setNotesSettings({ ...notesSettings, notes_server_url: e.target.value })}
-                    className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-                    placeholder="http://your-notes-server"
+                    value={notesSettings.notes_user}
+                    onChange={(e) => setNotesSettings({ ...notesSettings, notes_user: e.target.value })}
+                    className={inputCls}
+                    placeholder="Notes 用户名"
                   />
-                  <p className="text-xs text-gray-400 mt-1">HCL Notes服务器的API地址</p>
                 </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      用户名
-                    </label>
-                    <input
-                      type="text"
-                      value={notesSettings.notes_user}
-                      onChange={(e) => setNotesSettings({ ...notesSettings, notes_user: e.target.value })}
-                      className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-                      placeholder="Notes用户名"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      密码
-                    </label>
-                    <input
-                      type="password"
-                      value={notesSettings.notes_password}
-                      onChange={(e) => setNotesSettings({ ...notesSettings, notes_password: e.target.value })}
-                      className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-                      placeholder="Notes密码"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-4">
-                  <Button variant="secondary" onClick={handleTestConnection}>
-                    <RefreshCw className="w-4 h-4" />
-                    测试连接
-                  </Button>
+                <div>
+                  <label className={labelCls}>密码</label>
+                  <input
+                    type="password"
+                    value={notesSettings.notes_password}
+                    onChange={(e) => setNotesSettings({ ...notesSettings, notes_password: e.target.value })}
+                    className={inputCls}
+                    placeholder="Notes 密码"
+                  />
                 </div>
               </div>
-            </Card>
+              <p className={hintCls}>保存后可在「个人资料」页执行文档同步与导入</p>
+            </div>
           )}
         </div>
       </div>

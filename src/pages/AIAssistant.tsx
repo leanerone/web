@@ -7,9 +7,7 @@ import {
   Clock,
   CheckCircle2,
   RefreshCw,
-  FileText,
   TrendingUp,
-  Calendar,
   AlertTriangle,
   ArrowUpDown,
   Sun,
@@ -188,18 +186,11 @@ export default function AIAssistant() {
   ];
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-in space-y-4">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Bot className="w-6 h-6 text-cyan-600" />
-            AI规划助手
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">AI驱动的智能工作规划与提醒</p>
-        </div>
-        <div className="text-sm text-gray-500">
-          当前工作项: <span className="font-medium text-cyan-600">{workItems.length}</span> 个
-        </div>
+        <p className="text-sm text-gray-400">
+          当前工作项: <span className="font-medium text-accent-600">{workItems.length}</span> 个
+        </p>
       </div>
 
       <div className="flex border-b border-gray-200">
@@ -211,7 +202,7 @@ export default function AIAssistant() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors ${
                 activeTab === tab.id
-                  ? 'text-cyan-600 border-b-2 border-cyan-500'
+                  ? 'text-accent-600 border-b-2 border-accent-500'
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -397,7 +388,7 @@ export default function AIAssistant() {
                             <p className="text-xs text-gray-500">{reminder.message}</p>
                           </div>
                           {reminder.priority_score && (
-                            <span className="text-xs font-medium text-cyan-600">
+                            <span className="text-xs font-medium text-accent-600">
                               优先级 {reminder.priority_score.toFixed(1)}
                             </span>
                           )}
@@ -425,7 +416,7 @@ export default function AIAssistant() {
             <div className="p-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-medium text-gray-800 flex items-center gap-2">
-                  <TrendingUp className="w-5 h-5 text-cyan-500" />
+                  <TrendingUp className="w-5 h-5 text-accent-500" />
                   工作规划
                 </h3>
                 <Button onClick={handleGeneratePlan} loading={loading}>
@@ -436,13 +427,13 @@ export default function AIAssistant() {
 
               {aiPlan && (
                 <div className="space-y-4">
-                  <div className="p-4 bg-cyan-50 rounded-lg">
+                  <div className="p-4 bg-accent-50 rounded-lg">
                     <pre className="text-sm text-gray-700 whitespace-pre-wrap font-sans">{aiPlan}</pre>
                   </div>
                   {aiSuggestions.length > 0 && (
                     <div>
                       <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
-                        <Lightbulb className="w-4 h-4 text-cyan-500" />
+                        <Lightbulb className="w-4 h-4 text-accent-500" />
                         AI建议
                       </h4>
                       <div className="space-y-2">
@@ -480,12 +471,12 @@ export default function AIAssistant() {
                 <div
                   className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                     message.type === 'user'
-                      ? 'bg-cyan-100'
-                      : 'bg-gradient-to-br from-cyan-500 to-blue-600'
+                      ? 'bg-accent-100'
+                      : 'brand-gradient'
                   }`}
                 >
                   {message.type === 'user' ? (
-                    <span className="text-cyan-700 text-xs font-bold">我</span>
+                    <span className="text-accent-700 text-xs font-bold">我</span>
                   ) : (
                     <Bot className="w-4 h-4 text-white" />
                   )}
@@ -494,7 +485,7 @@ export default function AIAssistant() {
                   <div
                     className={`p-3 rounded-xl ${
                       message.type === 'user'
-                        ? 'bg-cyan-100 text-cyan-800 rounded-tr-none'
+                        ? 'bg-accent-100 text-accent-800 rounded-tr-none'
                         : 'bg-gray-100 text-gray-800 rounded-tl-none'
                     }`}
                   >
@@ -518,7 +509,7 @@ export default function AIAssistant() {
             ))}
             {loading && (
               <div className="flex gap-3">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center flex-shrink-0">
+                <div className="w-8 h-8 rounded-full brand-gradient flex items-center justify-center flex-shrink-0">
                   <Bot className="w-4 h-4 text-white" />
                 </div>
                 <div className="bg-gray-100 rounded-xl p-3 rounded-tl-none">
@@ -534,7 +525,7 @@ export default function AIAssistant() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && handleChat()}
-                className="flex-1 px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:border-cyan-500"
+                className="flex-1 px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:border-accent-500"
                 placeholder="输入您的问题..."
               />
               <Button onClick={handleChat} disabled={!input.trim() || loading}>

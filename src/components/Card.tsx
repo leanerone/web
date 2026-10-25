@@ -4,13 +4,15 @@ interface CardProps {
   children: React.ReactNode;
   footer?: React.ReactNode;
   hover?: boolean;
+  onClick?: () => void;
 }
 
-export default function Card({ title, className, children, footer, hover = false }: CardProps) {
+export default function Card({ title, className, children, footer, hover = false, onClick }: CardProps) {
   return (
     <div
+      onClick={onClick}
       className={`bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm ${
-        hover ? 'hover:border-cyan-300 hover:shadow-lg transition-all duration-300 cursor-pointer' : ''
+        hover || onClick ? 'hover:border-gray-300 hover:shadow-md transition-all cursor-pointer' : ''
       } ${className || ''}`}
     >
       {title && (

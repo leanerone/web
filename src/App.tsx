@@ -6,6 +6,7 @@ import Dashboard from '@/pages/Dashboard';
 import Projects from '@/pages/Projects';
 import ProjectDetail from '@/pages/ProjectDetail';
 import Equipment from '@/pages/Equipment';
+import EquipmentDetail from '@/pages/EquipmentDetail';
 import Requirements from '@/pages/Requirements';
 import RequirementDetail from '@/pages/RequirementDetail';
 import AIAssistant from '@/pages/AIAssistant';
@@ -15,23 +16,25 @@ import Users from '@/pages/Users';
 import Settings from '@/pages/Settings';
 import Login from '@/pages/Login';
 import WorkItems from '@/pages/WorkItems';
+import { Toaster } from '@/components/ui/Toast';
 import { useAuthStore } from '@/stores/authStore';
+import useAppStore, { applyTheme } from '@/stores/appStore';
 
 const pageTitles: Record<string, { title: string; subtitle?: string }> = {
   '/': { title: '仪表盘', subtitle: '工作概览与统计' },
   '/dashboard': { title: '仪表盘', subtitle: '工作概览与统计' },
-  '/work-items': { title: '工作管理', subtitle: '管理日常工作项目' },
-  '/projects': { title: '项目管理', subtitle: '项目进度与任务跟踪' },
+  '/work-items': { title: '工作台', subtitle: '日常工作项管理' },
+  '/projects': { title: '项目', subtitle: '项目进度与任务跟踪' },
   '/projects/:id': { title: '项目详情', subtitle: '项目规划与任务管理' },
-  '/equipment': { title: '机台管理', subtitle: '设备状态与配置管理' },
+  '/equipment': { title: '机台', subtitle: '量产设备数据查询' },
   '/equipment/:equipmentName': { title: '机台详情', subtitle: '设备详细信息' },
-  '/requirements': { title: '需求管理', subtitle: '用户需求与变更记录' },
+  '/requirements': { title: '需求', subtitle: '用户需求与变更记录' },
   '/requirements/:id': { title: '需求详情', subtitle: '需求详细信息' },
   '/ai-assistant': { title: 'AI规划助手', subtitle: '智能工作规划' },
-  '/weekly-report': { title: '周报管理', subtitle: '周报生成与历史记录' },
+  '/weekly-report': { title: '周报', subtitle: '周报生成与历史记录' },
   '/profile': { title: '个人资料', subtitle: '用户信息与系统设置' },
-  '/users': { title: '用户管理', subtitle: '用户与权限管理' },
-  '/settings': { title: '系统设置', subtitle: '系统配置与集成' },
+  '/users': { title: '用户', subtitle: '用户与权限管理' },
+  '/settings': { title: '设置', subtitle: '系统配置与集成' },
 };
 
 function PageContent() {
@@ -44,10 +47,16 @@ function PageContent() {
     pageInfo = pageTitles[basePath] || { title: 'CIM Manager' };
   }
 
+  const { sidebarCollapsed } = useAppStore();
+
   return (
-    <div className="flex-1 flex flex-col overflow-hidden ml-64">
+    <div
+      className={`flex flex-1 flex-col overflow-hidden transition-[margin] duration-200 ${
+        sidebarCollapsed ? 'ml-16' : 'ml-60'
+      }`}
+    >
       <Header title={pageInfo.title} subtitle={pageInfo.subtitle} />
-      <main className="flex-1 overflow-auto p-6">
+      <main className="flex-1 overflow-auto bg-gray-50 p-6">
         <Routes>
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard" element={<Dashboard />} />
@@ -55,6 +64,7 @@ function PageContent() {
           <Route path="/projects" element={<Projects />} />
           <Route path="/projects/:id" element={<ProjectDetail />} />
           <Route path="/equipment" element={<Equipment />} />
+          <Route path="/equipment/:equipmentName" element={<EquipmentDetail />} />
           <Route path="/requirements" element={<Requirements />} />
           <Route path="/requirements/:id" element={<RequirementDetail />} />
           <Route path="/ai-assistant" element={<AIAssistant />} />
@@ -73,13 +83,14 @@ function ProtectedApp() {
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
+    applyTheme(useAppStore.getState().theme);
     initialize();
     setInitialized(true);
   }, [initialize]);
 
   if (!initialized) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="text-gray-400">加载中...</div>
       </div>
     );
@@ -98,6 +109,7 @@ function ProtectedApp() {
     <div className="flex h-screen bg-gray-50 text-gray-800">
       <Sidebar />
       <PageContent />
+      <Toaster />
     </div>
   );
 }

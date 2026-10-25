@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   ArrowLeft,
   AlertTriangle,
@@ -16,16 +16,10 @@ import { useParams, useNavigate } from 'react-router-dom';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
+import { PriorityBadge } from '@/components/ui/Badge';
+import { toast } from '@/components/ui/Toast';
 import { requirementAPI, equipmentAPI } from '@/services/api';
 import type { Requirement, Equipment, ChangeRecord } from '@/types';
-
-const mockChangeRecords: ChangeRecord[] = [
-  { id: 1, requirement_id: 4, change_type: '驱动代码修改', description: '更新CMP设备驱动主程序，修复内存泄漏问题', file_path: '/drivers/cmp/driver_main.py', applied_at: '2026-07-12' },
-  { id: 2, requirement_id: 4, change_type: '配置文件更新', description: '更新设备参数配置文件，优化工艺参数', file_path: '/config/cmp/params.cfg', applied_at: '2026-07-13' },
-  { id: 3, requirement_id: 8, change_type: '驱动代码修改', description: '重写PVD设备通信层，支持SECS-II协议', file_path: '/drivers/pvd/comm_layer.py', applied_at: '2026-07-10' },
-  { id: 4, requirement_id: 2, change_type: '配置文件更新', description: '调整EPI沉积参数，优化薄膜均匀性', file_path: '/config/epi/recipe.cfg', applied_at: '2026-07-11' },
-  { id: 5, requirement_id: 5, change_type: '测试验证', description: '光刻机新配方验证测试通过', file_path: '', applied_at: '2026-07-12' },
-];
 
 const statusFlow = [
   { status: 'dev', label: '开发中', icon: Clock },
@@ -66,42 +60,45 @@ export default function RequirementDetail() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const fetchChangeRecords = useCallback(async (requirementId?: number) => {
+    const rid = requirementId ?? parseInt(id || '0');
+    if (!rid) return;
+    try {
+      const res = await requirementAPI.listChanges(rid);
+      if (res.success) setChangeRecords(res.data);
+    } catch {
+      console.error('Failed to fetch change records');
+    }
+  }, [id]);
+
   useEffect(() => {
     const fetchData = async () => {
       const requirementId = parseInt(id || '0');
+      if (!requirementId) {
+        setLoading(false);
+        return;
+      }
       try {
-        const [reqRes, equipRes] = await Promise.all([
-          requirementAPI.list(),
+        const [reqRes, equipRes] = await Promise.allSettled([
+          requirementAPI.get(requirementId),
           equipmentAPI.list(),
         ]);
-        if (reqRes.success) {
-          const found = reqRes.data.find((r: Requirement) => r.id === requirementId);
-          if (found) {
-            setRequirement(found);
-            if (equipRes.success) {
-              setEquipmentList(equipRes.data);
-            }
-            setChangeRecords(mockChangeRecords.filter((c) => c.requirement_id === requirementId));
-          }
+        if (reqRes.status === 'fulfilled' && reqRes.value.success) {
+          setRequirement(reqRes.value.data);
         }
+        if (equipRes.status === 'fulfilled' && equipRes.value.success) {
+          setEquipmentList(equipRes.value.data);
+        }
+        await fetchChangeRecords(requirementId);
       } catch (err) {
         console.error('Failed to fetch requirement:', err);
+        toast.error('需求详情加载失败');
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, [id]);
-
-  const getPriorityColor = (priority: string) => {
-    const colors: Record<string, string> = {
-      critical: 'bg-red-500',
-      high: 'bg-orange-500',
-      medium: 'bg-blue-500',
-      low: 'bg-gray-400',
-    };
-    return colors[priority] || 'bg-gray-400';
-  };
+  }, [id, fetchChangeRecords]);
 
   const getPriorityLabel = (priority: string) => {
     const labels: Record<string, string> = {
@@ -115,7 +112,7 @@ export default function RequirementDetail() {
 
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
-      dev: 'bg-cyan-50 text-cyan-600',
+      dev: 'bg-accent-50 text-accent-600',
       testing: 'bg-blue-50 text-blue-600',
       deploying: 'bg-orange-50 text-orange-600',
       completed: 'bg-green-50 text-green-600',
@@ -138,19 +135,28 @@ export default function RequirementDetail() {
     return statusFlow.findIndex((s) => s.status === requirement.status);
   };
 
-  const handleAddChangeRecord = () => {
-    if (!formData.change_type || !formData.description) return;
-    const newRecord: ChangeRecord = {
-      id: Date.now(),
-      requirement_id: requirement?.id || 0,
-      change_type: formData.change_type || '',
-      description: formData.description || '',
-      file_path: formData.file_path || '',
-      applied_at: new Date().toISOString().split('T')[0],
-    };
-    setChangeRecords((prev) => [newRecord, ...prev]);
-    setIsChangeModalOpen(false);
-    setFormData({ change_type: '', description: '' });
+  const handleAddChangeRecord = async () => {
+    if (!requirement || !formData.change_type || !formData.description) return;
+    setSaving(true);
+    try {
+      const res = await requirementAPI.createChange(requirement.id, {
+        change_type: formData.change_type || '',
+        description: formData.description || '',
+        file_path: formData.file_path || undefined,
+      });
+      if (res.success) {
+        setIsChangeModalOpen(false);
+        setFormData({ change_type: '', description: '' });
+        toast.success('变更记录已添加');
+        await fetchChangeRecords();
+      } else {
+        toast.error(res.message || '添加失败');
+      }
+    } catch {
+      toast.error('添加失败，请检查后端服务');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleEditSave = async () => {
@@ -170,12 +176,14 @@ export default function RequirementDetail() {
       const res = await requirementAPI.update(requirement.id, updateData);
       if (res.success) {
         setRequirement({ ...requirement, ...updateData, updated_at: new Date().toISOString() });
+        toast.success('已保存，变更已自动记录');
+        await fetchChangeRecords();
       } else {
-        alert('保存失败: ' + (res.message || '未知错误'));
+        toast.error(res.message || '保存失败');
       }
     } catch (err) {
       console.error('Failed to update requirement:', err);
-      alert('保存失败，请重试');
+      toast.error('保存失败，请重试');
     } finally {
       setSaving(false);
     }
@@ -188,13 +196,14 @@ export default function RequirementDetail() {
     try {
       const res = await requirementAPI.delete(requirement.id);
       if (res.success) {
+        toast.success('需求已删除');
         navigate('/requirements');
       } else {
-        alert('删除失败: ' + (res.message || '未知错误'));
+        toast.error(res.message || '删除失败');
       }
     } catch (err) {
       console.error('Failed to delete requirement:', err);
-      alert('删除失败，请重试');
+      toast.error('删除失败，请重试');
     }
   };
 
@@ -208,16 +217,20 @@ export default function RequirementDetail() {
           status: newStatus as Requirement['status'],
           updated_at: new Date().toISOString(),
         });
+        toast.success('状态已更新，变更已自动记录');
+        await fetchChangeRecords();
+      } else {
+        toast.error(res.message || '状态更新失败');
       }
     } catch (err) {
       console.error('Failed to change status:', err);
-      alert('状态更新失败，请重试');
+      toast.error('状态更新失败，请重试');
     }
   };
 
   if (loading) {
     return (
-      <div className="p-6 animate-fade-in">
+      <div className="animate-fade-in">
         <div className="flex items-center gap-4 mb-6">
           <Button variant="ghost" onClick={() => navigate('/requirements')}>
             <ArrowLeft className="w-4 h-4" />
@@ -238,7 +251,7 @@ export default function RequirementDetail() {
 
   if (!requirement) {
     return (
-      <div className="p-6 animate-fade-in text-center">
+      <div className="animate-fade-in p-6 text-center">
         <p className="text-gray-500 mb-4">需求不存在</p>
         <Button onClick={() => navigate('/requirements')}>
           <ArrowLeft className="w-4 h-4" />
@@ -249,20 +262,21 @@ export default function RequirementDetail() {
   }
 
   return (
-    <div className="p-6 animate-fade-in">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => navigate('/requirements')}>
+    <div className="animate-fade-in space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/requirements')}
+            className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+            title="返回需求列表"
+          >
             <ArrowLeft className="w-4 h-4" />
-            返回需求列表
-          </Button>
+          </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">{requirement.title}</h1>
-            <div className="flex items-center gap-3 mt-1">
-              <span className={`w-3 h-3 rounded-full ${getPriorityColor(requirement.priority)}`} />
-              <span className="text-sm text-gray-500">{getPriorityLabel(requirement.priority)}优先级</span>
-              <span className="text-sm text-gray-400">|</span>
-              <span className="text-sm text-gray-500">需求ID: #{requirement.id}</span>
+            <h1 className="text-lg font-semibold text-gray-900">{requirement.title}</h1>
+            <div className="flex items-center gap-2.5 mt-1">
+              <PriorityBadge value={requirement.priority} />
+              <span className="text-xs text-gray-400">#{requirement.id}</span>
             </div>
           </div>
         </div>
@@ -304,7 +318,7 @@ export default function RequirementDetail() {
                     <div className={`relative flex items-center justify-center w-10 h-10 rounded-full transition-all ${
                       isCompleted 
                         ? isCurrent 
-                          ? 'bg-cyan-500 shadow-lg shadow-cyan-500/30' 
+                          ? 'bg-accent-500 shadow-lg shadow-accent-500/30' 
                           : 'bg-green-500' 
                         : 'bg-gray-200'
                     }`}>
@@ -353,7 +367,7 @@ export default function RequirementDetail() {
                   href={requirement.notes_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-cyan-50 text-cyan-600 rounded-lg hover:bg-cyan-100 transition text-sm font-medium"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-accent-50 text-accent-600 rounded-lg hover:bg-accent-100 transition text-sm font-medium"
                 >
                   <ExternalLink className="w-4 h-4" />
                   打开 Notes 文档
@@ -382,15 +396,21 @@ export default function RequirementDetail() {
                 </div>
               ) : (
                 changeRecords.map((record) => (
-                  <div key={record.id} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-sm font-medium text-cyan-600">{record.change_type}</span>
-                      <span className="text-xs text-gray-500">{record.applied_at}</span>
+                  <div key={record.id} className="relative pl-6 pb-4 last:pb-0">
+                    <span className="absolute left-0 top-1.5 h-2.5 w-2.5 rounded-full bg-accent-500 ring-4 ring-accent-50" />
+                    {changeRecords.indexOf(record) < changeRecords.length - 1 && (
+                      <span className="absolute left-[4.5px] top-5 h-full w-px bg-gray-200" />
+                    )}
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-accent-600">{record.change_type}</span>
+                      <span className="text-xs text-gray-400">
+                        {new Date(record.applied_at).toLocaleString('zh-CN', { hour12: false })}
+                      </span>
                     </div>
                     <p className="text-sm text-gray-700">{record.description}</p>
                     {record.file_path && (
-                      <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                        <FileText className="w-3 h-3" />
+                      <div className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-400">
+                        <FileText className="h-3 w-3" />
                         <span className="font-mono">{record.file_path}</span>
                       </div>
                     )}
@@ -446,8 +466,8 @@ export default function RequirementDetail() {
                     linked.map((eq) => (
                       <div key={String(eq.equipment ?? eq.id)} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
                         <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-lg bg-cyan-50 flex items-center justify-center">
-                            <Cpu className="w-4 h-4 text-cyan-600" />
+                          <div className="w-9 h-9 rounded-lg bg-accent-50 flex items-center justify-center">
+                            <Cpu className="w-4 h-4 text-accent-600" />
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="font-medium text-gray-800 truncate">{eq.eq_name}</p>
@@ -455,7 +475,7 @@ export default function RequirementDetail() {
                           </div>
                           <button
                             onClick={() => navigate(`/equipment/${encodeURIComponent(String(eq.equipment ?? eq.id ?? eq.eq_name))}`)}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded text-cyan-600 hover:bg-cyan-50 transition-colors"
+                            className="inline-flex items-center justify-center w-8 h-8 rounded text-accent-600 hover:bg-accent-50 transition-colors"
                             title="查看机台详情"
                           >
                             <ChevronRight className="w-4 h-4" />
@@ -478,7 +498,7 @@ export default function RequirementDetail() {
           <Card title="操作历史">
             <div className="space-y-3">
               <div className="flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-cyan-500 mt-2" />
+                <div className="w-2 h-2 rounded-full bg-accent-500 mt-2" />
                 <div className="flex-1">
                   <p className="text-sm text-gray-700">需求创建</p>
                   <p className="text-xs text-gray-500">{new Date(requirement.created_at).toLocaleString()}</p>
@@ -522,7 +542,7 @@ export default function RequirementDetail() {
             <select
               value={formData.change_type}
               onChange={(e) => setFormData({ ...formData, change_type: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
             >
               <option value="">请选择变更类型</option>
               <option value="驱动代码修改">驱动代码修改</option>
@@ -537,7 +557,7 @@ export default function RequirementDetail() {
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500 resize-none"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500 resize-none"
               rows={3}
               placeholder="请描述本次变更的内容..."
             />
@@ -548,7 +568,7 @@ export default function RequirementDetail() {
               type="text"
               value={formData.file_path}
               onChange={(e) => setFormData({ ...formData, file_path: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               placeholder="例如: /drivers/cmp/driver.py"
             />
           </div>
@@ -556,7 +576,7 @@ export default function RequirementDetail() {
             <Button variant="ghost" onClick={() => setIsChangeModalOpen(false)}>
               取消
             </Button>
-            <Button onClick={handleAddChangeRecord} disabled={!formData.change_type || !formData.description}>
+            <Button onClick={handleAddChangeRecord} disabled={!formData.change_type || !formData.description} loading={saving}>
               添加记录
             </Button>
           </div>
@@ -576,7 +596,7 @@ export default function RequirementDetail() {
               type="text"
               value={editData.title || ''}
               onChange={(e) => setEditData({ ...editData, title: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               placeholder="请输入需求标题"
             />
           </div>
@@ -586,7 +606,7 @@ export default function RequirementDetail() {
               <select
                 value={editData.priority || 'medium'}
                 onChange={(e) => setEditData({ ...editData, priority: e.target.value as Requirement['priority'] })}
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               >
                 <option value="low">低</option>
                 <option value="medium">中</option>
@@ -599,7 +619,7 @@ export default function RequirementDetail() {
               <select
                 value={editData.status || 'dev'}
                 onChange={(e) => setEditData({ ...editData, status: e.target.value as Requirement['status'] })}
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               >
                 <option value="dev">开发中</option>
                 <option value="testing">测试中</option>
@@ -611,13 +631,13 @@ export default function RequirementDetail() {
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-sm font-medium text-gray-700">关联机台 (可多选)</label>
-              <span className="text-xs text-cyan-600">已选 {editEquipmentNames.length} 台</span>
+              <span className="text-xs text-accent-600">已选 {editEquipmentNames.length} 台</span>
             </div>
             <div className="grid grid-cols-2 gap-2 mb-2">
               <select
                 value={eqTypeFilter}
                 onChange={(e) => setEqTypeFilter(e.target.value)}
-                className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-accent-500"
               >
                 <option value="">全部类型</option>
                 {uniqueValues(equipmentList, 'eq_type').map((t) => (
@@ -627,7 +647,7 @@ export default function RequirementDetail() {
               <select
                 value={eqModelFilter}
                 onChange={(e) => setEqModelFilter(e.target.value)}
-                className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="px-3 py-1.5 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-accent-500"
               >
                 <option value="">全部型号</option>
                 {uniqueValues(equipmentList, 'eq_model').map((m) => (
@@ -645,7 +665,7 @@ export default function RequirementDetail() {
                   return (
                     <label
                       key={eqKey}
-                      className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-cyan-50 border-b border-gray-100 last:border-b-0 ${checked ? 'bg-cyan-50' : ''}`}
+                      className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-accent-50 border-b border-gray-100 last:border-b-0 ${checked ? 'bg-accent-50' : ''}`}
                     >
                       <input
                         type="checkbox"
@@ -657,7 +677,7 @@ export default function RequirementDetail() {
                             setEditEquipmentNames(editEquipmentNames.filter((n) => n !== eqKey));
                           }
                         }}
-                        className="w-4 h-4 text-cyan-600 rounded focus:ring-cyan-500"
+                        className="w-4 h-4 text-accent-600 rounded focus:ring-accent-500"
                       />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-gray-800 truncate">{eq.eq_name || eq.equipment || `机台 #${eq.id}`}</p>
@@ -678,7 +698,7 @@ export default function RequirementDetail() {
             <textarea
               value={editData.description || ''}
               onChange={(e) => setEditData({ ...editData, description: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500 resize-none"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500 resize-none"
               rows={4}
               placeholder="请输入需求描述..."
             />
@@ -689,7 +709,7 @@ export default function RequirementDetail() {
               type="url"
               value={editData.notes_url || ''}
               onChange={(e) => setEditData({ ...editData, notes_url: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               placeholder="https://notes.your-app.com/document/xxx"
             />
             <p className="text-xs text-gray-500 mt-1">点击后在详情页显示可跳转到 Notes app</p>

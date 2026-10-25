@@ -1,8 +1,22 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from database.session import get_db
-from services.requirement_service import get_requirements, get_requirement, create_requirement, update_requirement, delete_requirement
-from schemas.requirement import RequirementCreate, RequirementUpdate, RequirementResponse
+from services.requirement_service import (
+    get_requirements,
+    get_requirement,
+    create_requirement,
+    update_requirement,
+    delete_requirement,
+    get_change_records,
+    create_change_record,
+)
+from schemas.requirement import (
+    RequirementCreate,
+    RequirementUpdate,
+    RequirementResponse,
+    ChangeRecordCreate,
+    ChangeRecordResponse,
+)
 
 router = APIRouter(prefix="/requirements", tags=["requirements"])
 
@@ -54,3 +68,22 @@ def delete_requirement_api(requirement_id: int, db: Session = Depends(get_db)):
     if not success:
         return {"success": False, "message": "需求不存在"}
     return {"success": True}
+
+
+@router.get("/{requirement_id}/changes")
+def list_change_records(requirement_id: int, db: Session = Depends(get_db)):
+    if not get_requirement(db, requirement_id):
+        return {"success": False, "message": "需求不存在"}
+    records = get_change_records(db, requirement_id)
+    return {
+        "success": True,
+        "data": [ChangeRecordResponse.model_validate(r) for r in records],
+    }
+
+
+@router.post("/{requirement_id}/changes")
+def add_change_record(requirement_id: int, record: ChangeRecordCreate, db: Session = Depends(get_db)):
+    if not get_requirement(db, requirement_id):
+        return {"success": False, "message": "需求不存在"}
+    created = create_change_record(db, requirement_id, record)
+    return {"success": True, "data": ChangeRecordResponse.model_validate(created)}

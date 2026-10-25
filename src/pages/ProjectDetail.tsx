@@ -55,7 +55,7 @@ export default function ProjectDetail() {
   const getStatusColor = (status: string) => {
     const colors: Record<string, string> = {
       completed: 'bg-green-500',
-      in_progress: 'bg-cyan-500',
+      in_progress: 'bg-accent-500',
       pending: 'bg-gray-400',
       blocked: 'bg-red-500',
     };
@@ -239,7 +239,7 @@ export default function ProjectDetail() {
 
   if (loading || !project) {
     return (
-      <div className="p-6 animate-fade-in">
+      <div className="animate-fade-in">
         <div className="flex items-center gap-4 mb-6">
           <Button variant="ghost" onClick={() => navigate('/projects')}>
             <ArrowLeft className="w-4 h-4" />
@@ -259,16 +259,19 @@ export default function ProjectDetail() {
   }
 
   return (
-    <div className="p-6 animate-fade-in">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => navigate('/projects')}>
+    <div className="animate-fade-in space-y-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/projects')}
+            className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+            title="返回项目列表"
+          >
             <ArrowLeft className="w-4 h-4" />
-            返回项目列表
-          </Button>
+          </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">{project.name}</h1>
-            <p className="text-sm text-gray-500">{project.description}</p>
+            <h1 className="text-lg font-semibold text-gray-900">{project.name}</h1>
+            {project.description && <p className="mt-0.5 text-xs text-gray-400 line-clamp-1">{project.description}</p>}
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -290,13 +293,13 @@ export default function ProjectDetail() {
               <p className="text-sm text-gray-500">项目进度</p>
               <p className="text-3xl font-bold text-gray-800">{project.progress}%</p>
             </div>
-            <div className="w-16 h-16 rounded-full bg-cyan-50 flex items-center justify-center">
-              <TrendingUp className="w-8 h-8 text-cyan-600" />
+            <div className="w-16 h-16 rounded-full bg-accent-50 flex items-center justify-center">
+              <TrendingUp className="w-8 h-8 text-accent-600" />
             </div>
           </div>
           <div className="mt-4 h-3 bg-gray-100 rounded-full overflow-hidden">
             <div 
-              className="h-full bg-gradient-to-r from-cyan-500 to-blue-600 transition-all duration-500"
+              className="h-full brand-gradient-r transition-all duration-500"
               style={{ width: `${project.progress}%` }}
             />
           </div>
@@ -337,12 +340,12 @@ export default function ProjectDetail() {
               </p>
             </div>
             <div className={`w-16 h-16 rounded-full flex items-center justify-center ${
-              project.status === 'active' ? 'bg-cyan-50' :
+              project.status === 'active' ? 'bg-accent-50' :
               project.status === 'completed' ? 'bg-green-50' :
               project.status === 'paused' ? 'bg-orange-50' : 'bg-gray-50'
             }`}>
               <Target className={`w-8 h-8 ${
-                project.status === 'active' ? 'text-cyan-600' :
+                project.status === 'active' ? 'text-accent-600' :
                 project.status === 'completed' ? 'text-green-600' :
                 project.status === 'paused' ? 'text-orange-600' : 'text-gray-500'
               }`} />
@@ -396,7 +399,7 @@ export default function ProjectDetail() {
               <span className="text-xs text-gray-600">已完成</span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-4 h-4 rounded-full bg-cyan-500" />
+              <span className="w-4 h-4 rounded-full bg-accent-500" />
               <span className="text-xs text-gray-600">进行中</span>
             </div>
             <div className="flex items-center gap-2">
@@ -422,7 +425,7 @@ export default function ProjectDetail() {
               };
               const items = [
                 { label: '已完成', count: byStatus.completed, color: 'bg-green-500', text: 'text-green-600' },
-                { label: '进行中', count: byStatus.in_progress, color: 'bg-cyan-500', text: 'text-cyan-600' },
+                { label: '进行中', count: byStatus.in_progress, color: 'bg-accent-500', text: 'text-accent-600' },
                 { label: '待处理', count: byStatus.pending, color: 'bg-gray-400', text: 'text-gray-500' },
                 { label: '阻塞', count: byStatus.blocked, color: 'bg-red-500', text: 'text-red-600' },
               ];
@@ -489,7 +492,7 @@ export default function ProjectDetail() {
                 className={`p-4 rounded-lg border transition-all ${
                   task.status === 'completed' 
                     ? 'bg-green-50 border-green-200' 
-                    : 'bg-white border-gray-200 hover:border-cyan-300'
+                    : 'bg-white border-gray-200 hover:border-accent-300'
                 }`}
               >
                 <div className="flex items-center justify-between">
@@ -500,7 +503,7 @@ export default function ProjectDetail() {
                       className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
                         task.status === 'completed'
                           ? 'bg-green-500 border-green-500'
-                          : 'border-gray-300 hover:border-cyan-500'
+                          : 'border-gray-300 hover:border-accent-500'
                       }`}
                     >
                       {task.status === 'completed' && (
@@ -522,7 +525,7 @@ export default function ProjectDetail() {
                     </span>
                     <span className={`text-xs px-2 py-1 rounded-full font-medium ${
                       task.status === 'completed' ? 'bg-green-50 text-green-600' :
-                      task.status === 'in_progress' ? 'bg-cyan-50 text-cyan-600' :
+                      task.status === 'in_progress' ? 'bg-accent-50 text-accent-600' :
                       'bg-gray-50 text-gray-500'
                     }`}>
                       {getStatusLabel(task.status)}
@@ -563,7 +566,7 @@ export default function ProjectDetail() {
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               placeholder="请输入任务名称"
             />
           </div>
@@ -572,7 +575,7 @@ export default function ProjectDetail() {
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500 resize-none"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500 resize-none"
               rows={3}
               placeholder="请输入任务描述..."
             />
@@ -583,7 +586,7 @@ export default function ProjectDetail() {
               <select
                 value={formData.priority}
                 onChange={(e) => setFormData({ ...formData, priority: e.target.value as Task['priority'] })}
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               >
                 <option value="low">低</option>
                 <option value="medium">中</option>
@@ -597,7 +600,7 @@ export default function ProjectDetail() {
                 type="date"
                 value={formData.due_date}
                 onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               />
             </div>
           </div>
@@ -625,7 +628,7 @@ export default function ProjectDetail() {
               type="text"
               value={editProject.name || ''}
               onChange={(e) => setEditProject({ ...editProject, name: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               placeholder="项目名称"
             />
           </div>
@@ -634,7 +637,7 @@ export default function ProjectDetail() {
             <textarea
               value={editProject.description || ''}
               onChange={(e) => setEditProject({ ...editProject, description: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500 resize-none"
+              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500 resize-none"
               rows={3}
               placeholder="项目描述..."
             />
@@ -645,7 +648,7 @@ export default function ProjectDetail() {
               <select
                 value={editProject.status || 'active'}
                 onChange={(e) => setEditProject({ ...editProject, status: e.target.value as Project['status'] })}
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               >
                 <option value="active">进行中</option>
                 <option value="paused">已暂停</option>
@@ -667,7 +670,7 @@ export default function ProjectDetail() {
                 type="date"
                 value={editProject.start_date || ''}
                 onChange={(e) => setEditProject({ ...editProject, start_date: e.target.value })}
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               />
             </div>
             <div>
@@ -676,7 +679,7 @@ export default function ProjectDetail() {
                 type="date"
                 value={editProject.end_date || ''}
                 onChange={(e) => setEditProject({ ...editProject, end_date: e.target.value })}
-                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+                className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-accent-500"
               />
             </div>
           </div>

@@ -5,6 +5,7 @@ import type {
   Equipment,
   EquipmentType,
   Requirement,
+  ChangeRecord,
   Report,
   NotesDocument,
   Configuration,
@@ -113,18 +114,24 @@ export const equipmentAPI = {
 export const requirementAPI = {
   list: (params?: PaginationParams & SearchParams): Promise<APIResponse<Requirement[]>> =>
     api.get('/requirements', { params }),
-  
+
   get: (id: number): Promise<APIResponse<Requirement>> =>
     api.get(`/requirements/${id}`),
-  
+
   create: (data: CreateRequirementRequest): Promise<APIResponse<Requirement>> =>
     api.post('/requirements', data),
-  
+
   update: (id: number, data: Partial<Requirement>): Promise<APIResponse<Requirement>> =>
     api.put(`/requirements/${id}`, data),
-  
+
   delete: (id: number): Promise<APIResponse<void>> =>
     api.delete(`/requirements/${id}`),
+
+  listChanges: (id: number): Promise<APIResponse<ChangeRecord[]>> =>
+    api.get(`/requirements/${id}/changes`),
+
+  createChange: (id: number, data: { change_type: string; description: string; file_path?: string }): Promise<APIResponse<ChangeRecord>> =>
+    api.post(`/requirements/${id}/changes`, data),
 };
 
 export const reportAPI = {

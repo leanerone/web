@@ -1,40 +1,34 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
-  ClipboardList,
   Plus,
   Search,
-  Filter,
-  AlertTriangle,
-  Clock,
-  CheckCircle2,
-  Edit,
-  Trash2,
   Grid3x3,
   List,
   Zap,
   Target,
+  AlertTriangle,
+  Clock,
 } from 'lucide-react';
-import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
+import { PriorityBadge, RequirementStatusBadge } from '@/components/ui/Badge';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { toast } from '@/components/ui/Toast';
+import { priority, requirementStatus } from '@/constants/status';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { requirementAPI, equipmentAPI, projectAPI } from '@/services/api';
 import useAppStore from '@/stores/appStore';
 import type { Requirement, CreateRequirementRequest } from '@/types';
 
-
+const inputCls =
+  'rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 transition-colors focus:border-accent-500 focus:bg-white focus:outline-none';
 
 // 四象限分类逻辑
-// 紧急度: critical=紧急, high=较紧急, medium=一般, low=不紧急
-// 重要性: completed=低(已完成), testing/deploying=中, dev=高(开发中)
+// 重要性: dev(开发中)=重要；testing/deploying/completed=次要
+// 紧急度: critical/high=紧急；medium/low=不紧急
 function getQuadrant(req: Requirement): number {
-  // Q1: 紧急且重要 (critical + dev)
-  // Q2: 不紧急但重要 (medium/low + dev)
-  // Q3: 紧急但不重要 (critical/high + completed/testing/deploying)
-  // Q4: 不紧急不重要 (medium/low + completed/testing/deploying)
   const isUrgent = req.priority === 'critical' || req.priority === 'high';
   const isImportant = req.status === 'dev';
-
   if (isUrgent && isImportant) return 1;
   if (!isUrgent && isImportant) return 2;
   if (isUrgent && !isImportant) return 3;
@@ -42,16 +36,19 @@ function getQuadrant(req: Requirement): number {
 }
 
 const quadrantConfig = [
-  { id: 1, title: '紧急且重要', subtitle: '立即处理', color: 'border-red-400 bg-red-50', headerColor: 'text-red-600 bg-red-100', icon: Zap },
-  { id: 2, title: '重要不紧急', subtitle: '计划安排', color: 'border-blue-400 bg-blue-50', headerColor: 'text-blue-600 bg-blue-100', icon: Target },
-  { id: 3, title: '紧急不重要', subtitle: '委托处理', color: 'border-orange-400 bg-orange-50', headerColor: 'text-orange-600 bg-orange-100', icon: AlertTriangle },
-  { id: 4, title: '不紧急不重要', subtitle: '待空闲时', color: 'border-gray-300 bg-gray-50', headerColor: 'text-gray-500 bg-gray-100', icon: Clock },
+  { id: 1, title: '紧急且重要', subtitle: '立即处理', icon: Zap, ring: 'ring-red-200', header: 'bg-red-50 text-red-700', card: 'hover:border-red-300', dot: 'bg-red-200' },
+  { id: 2, title: '重要不紧急', subtitle: '计划安排', icon: Target, ring: 'ring-blue-200', header: 'bg-blue-50 text-blue-700', card: 'hover:border-blue-300', dot: 'bg-blue-200' },
+  { id: 3, title: '紧急不重要', subtitle: '委托处理', icon: AlertTriangle, ring: 'ring-amber-200', header: 'bg-amber-50 text-amber-700', card: 'hover:border-amber-300', dot: 'bg-amber-200' },
+  { id: 4, title: '不紧急不重要', subtitle: '待空闲时', icon: Clock, ring: 'ring-gray-200', header: 'bg-gray-50 text-gray-600', card: 'hover:border-gray-300', dot: 'bg-gray-200' },
 ];
+
+const KANBAN_STATUSES = ['dev', 'testing', 'deploying', 'completed'] as const;
 
 export default function Requirements() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { requirements, equipment, projects, setRequirements, setEquipment, setProjects, addRequirement, deleteRequirement } = useAppStore();
+  const { equipment, projects, setEquipment, setProjects } = useAppStore();
+  const [requirements, setRequirements] = useState<Requirement[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -60,48 +57,56 @@ export default function Requirements() {
   const [viewMode, setViewMode] = useState<'kanban' | 'quadrant'>('kanban');
   const [formData, setFormData] = useState<CreateRequirementRequest>({ title: '', description: '' });
   const [loading, setLoading] = useState(true);
+  // 看板拖拽状态
+  const [draggingId, setDraggingId] = useState<number | null>(null);
+  const [dragOverStatus, setDragOverStatus] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [reqRes, equipRes, projectRes] = await Promise.all([
+        const [reqRes, equipRes, projectRes] = await Promise.allSettled([
           requirementAPI.list(),
           equipmentAPI.list(),
           projectAPI.list(),
         ]);
-        if (reqRes.success) {
-          setRequirements(reqRes.data);
+        if (reqRes.status === 'fulfilled' && reqRes.value.success) setRequirements(reqRes.value.data);
+        if (equipRes.status === 'fulfilled' && equipRes.value.success) setEquipment(equipRes.value.data);
+        if (projectRes.status === 'fulfilled' && projectRes.value.success) setProjects(projectRes.value.data);
+        if (reqRes.status === 'fulfilled' && !reqRes.value.success) {
+          toast.error(reqRes.value.message || '需求列表加载失败');
         }
-        if (equipRes.success) {
-          setEquipment(equipRes.data);
-        }
-        if (projectRes.success) {
-          setProjects(projectRes.data);
-        }
-      } catch (err) {
-        console.error('Failed to fetch data:', err);
+      } catch {
+        toast.error('需求列表加载失败，请检查后端服务');
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, [setRequirements, setEquipment]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const filteredRequirements = requirements.filter((req) => {
-    const matchesSearch = req.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      req.description.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesPriority = priorityFilter === 'all' || req.priority === priorityFilter;
-    const matchesStatus = statusFilter === 'all' || req.status === statusFilter;
-    const matchesEquipment = equipmentFilter === 'all' || (() => {
-      if (!req.equipment_name) return false;
-      try {
-        const arr = JSON.parse(req.equipment_name);
-        if (Array.isArray(arr)) return arr.includes(equipmentFilter);
-      } catch {}
-      return req.equipment_name === equipmentFilter;
-    })();
-    return matchesSearch && matchesPriority && matchesStatus && matchesEquipment;
-  });
+  const filteredRequirements = useMemo(
+    () =>
+      requirements.filter((req) => {
+        const q = searchQuery.toLowerCase();
+        const matchesSearch = req.title.toLowerCase().includes(q) ||
+          req.description?.toLowerCase().includes(q);
+        const matchesPriority = priorityFilter === 'all' || req.priority === priorityFilter;
+        const matchesStatus = statusFilter === 'all' || req.status === statusFilter;
+        const matchesEquipment = equipmentFilter === 'all' || (() => {
+          if (!req.equipment_name) return false;
+          try {
+            const arr = JSON.parse(req.equipment_name);
+            if (Array.isArray(arr)) return arr.includes(equipmentFilter);
+          } catch {
+            /* 旧数据为单值 */
+          }
+          return req.equipment_name === equipmentFilter;
+        })();
+        return matchesSearch && matchesPriority && matchesStatus && matchesEquipment;
+      }),
+    [requirements, searchQuery, priorityFilter, statusFilter, equipmentFilter]
+  );
 
   // 同步 URL 参数（机台页跳转过来时自动选中）
   useEffect(() => {
@@ -122,73 +127,52 @@ export default function Requirements() {
     setSearchParams(searchParams, { replace: true });
   };
 
+  /** 拖拽卡片到目标状态列：乐观更新 + PUT 失败回滚（后端会自动写入变更记录） */
+  const handleDropOnColumn = async (newStatus: string) => {
+    setDragOverStatus(null);
+    const dragId = draggingId;
+    setDraggingId(null);
+    if (dragId === null) return;
+    const req = requirements.find((r) => r.id === dragId);
+    if (!req || req.status === newStatus) return;
+
+    const prevRequirements = requirements;
+    // 乐观更新
+    setRequirements((prev) => prev.map((r) => (r.id === dragId ? { ...r, status: newStatus as Requirement['status'] } : r)));
+    try {
+      const res = await requirementAPI.update(dragId, { status: newStatus as Requirement['status'] });
+      if (res.success) {
+        toast.success(`已移动到「${requirementStatus.label(newStatus)}」`);
+      } else {
+        setRequirements(prevRequirements);
+        toast.error(res.message || '状态更新失败');
+      }
+    } catch {
+      setRequirements(prevRequirements);
+      toast.error('状态更新失败，请检查后端服务');
+    }
+  };
+
   const handleCreate = async () => {
     if (!formData.title) return;
     try {
       const res = await requirementAPI.create(formData);
       if (res.success) {
-        addRequirement(res.data);
+        setRequirements((prev) => [res.data, ...prev]);
+        toast.success('需求已创建');
+      } else {
+        toast.error(res.message || '创建失败');
       }
-    } catch (err) {
-      console.error('Failed to create requirement:', err);
+    } catch {
+      toast.error('创建失败，请重试');
     }
     setIsCreateModalOpen(false);
     setFormData({ title: '', description: '' });
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm('确定要删除这个需求吗？')) return;
-    try {
-      await requirementAPI.delete(id);
-      deleteRequirement(id);
-    } catch (err) {
-      console.error('Failed to delete requirement:', err);
-    }
-  };
-
-  const getPriorityColor = (priority: string) => {
-    const colors: Record<string, string> = {
-      low: 'bg-gray-100 text-gray-600',
-      medium: 'bg-blue-50 text-blue-600',
-      high: 'bg-orange-50 text-orange-600',
-      critical: 'bg-red-50 text-red-600',
-    };
-    return colors[priority] || 'bg-gray-100 text-gray-600';
-  };
-
-  const getPriorityLabel = (priority: string) => {
-    const labels: Record<string, string> = {
-      low: '低',
-      medium: '中',
-      high: '高',
-      critical: '紧急',
-    };
-    return labels[priority] || priority;
-  };
-
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      dev: 'bg-blue-50 text-blue-600',
-      testing: 'bg-orange-50 text-orange-600',
-      deploying: 'bg-purple-50 text-purple-600',
-      completed: 'bg-green-50 text-green-600',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-600';
-  };
-
-  const getStatusLabel = (status: string) => {
-    const labels: Record<string, string> = {
-      dev: '开发中',
-      testing: '测试中',
-      deploying: '上线中',
-      completed: '已完成',
-    };
-    return labels[status] || status;
-  };
-
   // 解析 equipment_name (JSON 数组字符串) 为机台名称展示文本, 兼容旧单值
   const getEquipmentName = (equipmentName?: string) => {
-    if (!equipmentName) return '未关联';
+    if (!equipmentName) return '';
     let names: string[] = [];
     try {
       const arr = JSON.parse(equipmentName);
@@ -197,7 +181,7 @@ export default function Requirements() {
     } catch {
       names = [equipmentName];
     }
-    if (names.length === 0) return '未关联';
+    if (names.length === 0) return '';
     const labels = names.map((n) => {
       const eq = equipment.find((e) => (e.equipment ?? String(e.id)) === n);
       return eq ? (eq.eq_name || eq.equipment || n) : n;
@@ -206,447 +190,313 @@ export default function Requirements() {
     return labels.length > 1 ? `${txt} 等${labels.length}台` : txt;
   };
 
-  const statusOrder = { dev: 0, testing: 1, deploying: 2, completed: 3 };
-  const priorityOrder = { critical: 0, high: 1, medium: 2, low: 3 };
+  const statusOrder: Record<string, number> = { dev: 0, testing: 1, deploying: 2, completed: 3 };
+  const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 
   const sortedRequirements = [...filteredRequirements].sort((a, b) => {
-    return statusOrder[a.status] - statusOrder[b.status] || priorityOrder[a.priority] - priorityOrder[b.priority];
+    return (statusOrder[a.status] ?? 9) - (statusOrder[b.status] ?? 9) || (priorityOrder[a.priority] ?? 9) - (priorityOrder[b.priority] ?? 9);
   });
 
-  return (
-    <div className="animate-fade-in">
-      <div className="p-6">
-        <Card className="mb-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="搜索需求标题或描述..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-cyan-500 w-full sm:w-64"
-                />
-              </div>
-              <div className="relative">
-                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <select
-                  value={priorityFilter}
-                  onChange={(e) => setPriorityFilter(e.target.value)}
-                  className="pl-10 pr-8 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500 appearance-none w-full sm:w-36"
-                >
-                  <option value="all">全部优先级</option>
-                  <option value="critical">紧急</option>
-                  <option value="high">高</option>
-                  <option value="medium">中</option>
-                  <option value="low">低</option>
-                </select>
-              </div>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500 appearance-none w-full sm:w-36"
-              >
-                <option value="all">全部状态</option>
-                <option value="dev">开发中</option>
-                <option value="testing">测试中</option>
-                <option value="deploying">上线中</option>
-                <option value="completed">已完成</option>
-              </select>
-              <select
-                value={equipmentFilter}
-                onChange={(e) => handleEquipmentFilterChange(e.target.value)}
-                className="px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500 appearance-none w-full sm:w-44"
-                title="按关联机台筛选"
-              >
-                <option value="all">全部机台</option>
-                {equipment.map((item) => {
-                  const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
-                  const label = item.eq_name || item.equipment || `机台 #${item.id}`;
-                  return (
-                    <option key={eqKey} value={eqKey}>{label}</option>
-                  );
-                })}
-              </select>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex bg-gray-100 rounded-lg p-1">
-                <button
-                  onClick={() => setViewMode('kanban')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                    viewMode === 'kanban' ? 'bg-white text-cyan-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <List className="w-4 h-4" />
-                  看板
-                </button>
-                <button
-                  onClick={() => setViewMode('quadrant')}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                    viewMode === 'quadrant' ? 'bg-white text-cyan-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                >
-                  <Grid3x3 className="w-4 h-4" />
-                  四象限
-                </button>
-              </div>
-              <Button onClick={() => setIsCreateModalOpen(true)}>
-                <Plus className="w-4 h-4" />
-                创建需求
-              </Button>
-            </div>
-          </div>
-        </Card>
+  const quadrants = quadrantConfig.map((cfg) => ({
+    ...cfg,
+    items: filteredRequirements.filter((r) => getQuadrant(r) === cfg.id),
+  }));
 
-        {/* 看板视图 */}
-        {viewMode === 'kanban' && (
-          <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-            {['dev', 'testing', 'deploying', 'completed'].map((status) => {
-              const statusRequirements = sortedRequirements.filter((r) => r.status === status);
+  return (
+    <div className="animate-fade-in space-y-4">
+      {/* 工具栏 */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="搜索需求标题或描述..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className={`${inputCls} w-full pl-9`}
+            />
+          </div>
+          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className={inputCls}>
+            <option value="all">全部优先级</option>
+            <option value="critical">紧急</option>
+            <option value="high">高</option>
+            <option value="medium">中</option>
+            <option value="low">低</option>
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={inputCls}>
+            <option value="all">全部状态</option>
+            {KANBAN_STATUSES.map((s) => (
+              <option key={s} value={s}>{requirementStatus.label(s)}</option>
+            ))}
+          </select>
+          <select
+            value={equipmentFilter}
+            onChange={(e) => handleEquipmentFilterChange(e.target.value)}
+            className={`${inputCls} sm:w-44`}
+            title="按关联机台筛选"
+          >
+            <option value="all">全部机台</option>
+            {equipment.map((item) => {
+              const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
+              const label = item.eq_name || item.equipment || `机台 #${item.id}`;
               return (
-                <Card key={status} title={getStatusLabel(status)} className="lg:col-span-1">
-                  <div className="space-y-3">
-                    {loading ? (
-                      <div className="space-y-3">
-                        {[1, 2, 3].map((i) => (
-                          <div key={i} className="p-3 bg-gray-50 rounded-lg animate-pulse h-16" />
-                        ))}
-                      </div>
-                    ) : statusRequirements.length === 0 ? (
-                      <div className="text-center py-8 text-gray-400">
-                        <ClipboardList className="w-8 h-8 mx-auto mb-2" />
-                        <p className="text-sm">暂无需求</p>
-                      </div>
-                    ) : (
-                      statusRequirements.map((req) => (
-                        <div 
-                          key={req.id} 
-                          className="p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer group border border-gray-200"
-                          onClick={() => navigate(`/requirements/${req.id}`)}
-                        >
-                          <div className="flex items-start justify-between gap-2 mb-2">
-                            <h4 className="text-sm font-medium text-gray-800 truncate flex-1">{req.title}</h4>
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/requirements/${req.id}`); }}>
-                                <Edit className="w-3 h-3" />
-                              </Button>
-                              <Button variant="danger" size="sm" onClick={(e) => { e.stopPropagation(); handleDelete(req.id); }}>
-                                <Trash2 className="w-3 h-3" />
-                              </Button>
-                            </div>
-                          </div>
-                          <p className="text-xs text-gray-500 mb-2 line-clamp-2">{req.description}</p>
-                          <div className="flex items-center gap-2">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${getPriorityColor(req.priority)}`}>
-                              {getPriorityLabel(req.priority)}
-                            </span>
-                            <span className="text-xs text-gray-400">{new Date(req.created_at).toLocaleDateString()}</span>
-                          </div>
-                          {req.equipment_name && (
-                            <p className="text-xs text-gray-500 mt-2 flex items-center gap-1">
-                              <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
-                              {getEquipmentName(req.equipment_name)}
-                            </p>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </Card>
+                <option key={eqKey} value={eqKey}>{label}</option>
               );
             })}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm">
+            {(['kanban', 'quadrant'] as const).map((mode) => (
+              <button
+                key={mode}
+                onClick={() => setViewMode(mode)}
+                className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  viewMode === mode ? 'bg-gray-900 text-white' : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                {mode === 'kanban' ? <List className="h-3.5 w-3.5" /> : <Grid3x3 className="h-3.5 w-3.5" />}
+                {mode === 'kanban' ? '看板' : '四象限'}
+              </button>
+            ))}
           </div>
-        )}
-
-        {/* 四象限视图 */}
-        {viewMode === 'quadrant' && (
-          <div className="space-y-4">
-            <Card>
-              <div className="p-4 bg-cyan-50 rounded-lg mb-4">
-                <div className="flex items-center gap-2 text-sm text-cyan-700">
-                  <Grid3x3 className="w-4 h-4" />
-                  <span className="font-medium">需求紧急度四象限分析</span>
-                  <span className="text-cyan-600">- 根据优先级和状态自动分类，帮助合理分配工作优先级</span>
-                </div>
-              </div>
-
-              {/* 轴标签 */}
-              <div className="flex items-center justify-center mb-2">
-                <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
-                  <span className="px-3 py-1 bg-gray-100 rounded-full">重要性（状态） →</span>
-                </div>
-              </div>
-
-              <div className="flex">
-                {/* Y轴标签 */}
-                <div className="flex flex-col items-center justify-around w-8 pr-2">
-                  <span className="text-xs font-medium text-gray-500 -rotate-90 whitespace-nowrap">← 紧急度</span>
-                </div>
-
-                {/* 四象限网格 */}
-                <div className="flex-1 grid grid-cols-2 gap-3" style={{ minHeight: '500px' }}>
-                  {/* Q1: 紧急且重要 */}
-                  <div className={`border-2 rounded-xl ${quadrantConfig[0].color} flex flex-col`}>
-                    <div className={`flex items-center gap-2 px-4 py-3 ${quadrantConfig[0].headerColor} rounded-t-xl`}>
-                      <Zap className="w-4 h-4" />
-                      <span className="font-semibold text-sm">{quadrantConfig[0].title}</span>
-                      <span className="text-xs opacity-75">- {quadrantConfig[0].subtitle}</span>
-                      <span className="ml-auto text-xs font-bold bg-white/50 px-2 py-0.5 rounded-full">
-                        {filteredRequirements.filter(r => getQuadrant(r) === 1).length}
-                      </span>
-                    </div>
-                    <div className="flex-1 p-3 space-y-2 overflow-y-auto" style={{ maxHeight: '400px' }}>
-                      {filteredRequirements.filter(r => getQuadrant(r) === 1).map(req => (
-                        <div 
-                          key={req.id} 
-                          className="p-3 bg-white rounded-lg border border-red-200 hover:shadow-md transition-shadow cursor-pointer"
-                          onClick={() => navigate(`/requirements/${req.id}`)}
-                        >
-                          <div className="flex items-start justify-between mb-1">
-                            <span className="text-sm font-medium text-gray-800 flex-1">{req.title}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getPriorityColor(req.priority)}`}>
-                              {getPriorityLabel(req.priority)}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-500 line-clamp-2 mb-1">{req.description}</p>
-                          <div className="flex items-center justify-between">
-                            <span className={`px-1.5 py-0.5 rounded text-xs ${getStatusColor(req.status)}`}>
-                              {getStatusLabel(req.status)}
-                            </span>
-                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_name)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {filteredRequirements.filter(r => getQuadrant(r) === 1).length === 0 && (
-                        <div className="text-center py-8 text-gray-400">
-                          <CheckCircle2 className="w-8 h-8 mx-auto mb-1 opacity-50" />
-                          <p className="text-xs">暂无需求</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Q2: 重要不紧急 */}
-                  <div className={`border-2 rounded-xl ${quadrantConfig[1].color} flex flex-col`}>
-                    <div className={`flex items-center gap-2 px-4 py-3 ${quadrantConfig[1].headerColor} rounded-t-xl`}>
-                      <Target className="w-4 h-4" />
-                      <span className="font-semibold text-sm">{quadrantConfig[1].title}</span>
-                      <span className="text-xs opacity-75">- {quadrantConfig[1].subtitle}</span>
-                      <span className="ml-auto text-xs font-bold bg-white/50 px-2 py-0.5 rounded-full">
-                        {filteredRequirements.filter(r => getQuadrant(r) === 2).length}
-                      </span>
-                    </div>
-                    <div className="flex-1 p-3 space-y-2 overflow-y-auto" style={{ maxHeight: '400px' }}>
-                      {filteredRequirements.filter(r => getQuadrant(r) === 2).map(req => (
-                        <div 
-                          key={req.id} 
-                          className="p-3 bg-white rounded-lg border border-blue-200 hover:shadow-md transition-shadow cursor-pointer"
-                          onClick={() => navigate(`/requirements/${req.id}`)}
-                        >
-                          <div className="flex items-start justify-between mb-1">
-                            <span className="text-sm font-medium text-gray-800 flex-1">{req.title}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getPriorityColor(req.priority)}`}>
-                              {getPriorityLabel(req.priority)}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-500 line-clamp-2 mb-1">{req.description}</p>
-                          <div className="flex items-center justify-between">
-                            <span className={`px-1.5 py-0.5 rounded text-xs ${getStatusColor(req.status)}`}>
-                              {getStatusLabel(req.status)}
-                            </span>
-                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_name)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {filteredRequirements.filter(r => getQuadrant(r) === 2).length === 0 && (
-                        <div className="text-center py-8 text-gray-400">
-                          <CheckCircle2 className="w-8 h-8 mx-auto mb-1 opacity-50" />
-                          <p className="text-xs">暂无需求</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Q3: 紧急不重要 */}
-                  <div className={`border-2 rounded-xl ${quadrantConfig[2].color} flex flex-col`}>
-                    <div className={`flex items-center gap-2 px-4 py-3 ${quadrantConfig[2].headerColor} rounded-t-xl`}>
-                      <AlertTriangle className="w-4 h-4" />
-                      <span className="font-semibold text-sm">{quadrantConfig[2].title}</span>
-                      <span className="text-xs opacity-75">- {quadrantConfig[2].subtitle}</span>
-                      <span className="ml-auto text-xs font-bold bg-white/50 px-2 py-0.5 rounded-full">
-                        {filteredRequirements.filter(r => getQuadrant(r) === 3).length}
-                      </span>
-                    </div>
-                    <div className="flex-1 p-3 space-y-2 overflow-y-auto" style={{ maxHeight: '400px' }}>
-                      {filteredRequirements.filter(r => getQuadrant(r) === 3).map(req => (
-                        <div 
-                          key={req.id} 
-                          className="p-3 bg-white rounded-lg border border-orange-200 hover:shadow-md transition-shadow cursor-pointer"
-                          onClick={() => navigate(`/requirements/${req.id}`)}
-                        >
-                          <div className="flex items-start justify-between mb-1">
-                            <span className="text-sm font-medium text-gray-800 flex-1">{req.title}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getPriorityColor(req.priority)}`}>
-                              {getPriorityLabel(req.priority)}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-500 line-clamp-2 mb-1">{req.description}</p>
-                          <div className="flex items-center justify-between">
-                            <span className={`px-1.5 py-0.5 rounded text-xs ${getStatusColor(req.status)}`}>
-                              {getStatusLabel(req.status)}
-                            </span>
-                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_name)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {filteredRequirements.filter(r => getQuadrant(r) === 3).length === 0 && (
-                        <div className="text-center py-8 text-gray-400">
-                          <CheckCircle2 className="w-8 h-8 mx-auto mb-1 opacity-50" />
-                          <p className="text-xs">暂无需求</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Q4: 不紧急不重要 */}
-                  <div className={`border-2 rounded-xl ${quadrantConfig[3].color} flex flex-col`}>
-                    <div className={`flex items-center gap-2 px-4 py-3 ${quadrantConfig[3].headerColor} rounded-t-xl`}>
-                      <Clock className="w-4 h-4" />
-                      <span className="font-semibold text-sm">{quadrantConfig[3].title}</span>
-                      <span className="text-xs opacity-75">- {quadrantConfig[3].subtitle}</span>
-                      <span className="ml-auto text-xs font-bold bg-white/50 px-2 py-0.5 rounded-full">
-                        {filteredRequirements.filter(r => getQuadrant(r) === 4).length}
-                      </span>
-                    </div>
-                    <div className="flex-1 p-3 space-y-2 overflow-y-auto" style={{ maxHeight: '400px' }}>
-                      {filteredRequirements.filter(r => getQuadrant(r) === 4).map(req => (
-                        <div 
-                          key={req.id} 
-                          className="p-3 bg-white rounded-lg border border-gray-200 hover:shadow-md transition-shadow cursor-pointer"
-                          onClick={() => navigate(`/requirements/${req.id}`)}
-                        >
-                          <div className="flex items-start justify-between mb-1">
-                            <span className="text-sm font-medium text-gray-800 flex-1">{req.title}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${getPriorityColor(req.priority)}`}>
-                              {getPriorityLabel(req.priority)}
-                            </span>
-                          </div>
-                          <p className="text-xs text-gray-500 line-clamp-2 mb-1">{req.description}</p>
-                          <div className="flex items-center justify-between">
-                            <span className={`px-1.5 py-0.5 rounded text-xs ${getStatusColor(req.status)}`}>
-                              {getStatusLabel(req.status)}
-                            </span>
-                            <span className="text-xs text-gray-400">{getEquipmentName(req.equipment_name)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {filteredRequirements.filter(r => getQuadrant(r) === 4).length === 0 && (
-                        <div className="text-center py-8 text-gray-400">
-                          <CheckCircle2 className="w-8 h-8 mx-auto mb-1 opacity-50" />
-                          <p className="text-xs">暂无需求</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-center mt-4 gap-6 text-xs text-gray-500">
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 bg-red-200 rounded"></span>
-                  <span>Q1 立即处理</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 bg-blue-200 rounded"></span>
-                  <span>Q2 计划安排</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 bg-orange-200 rounded"></span>
-                  <span>Q3 委托处理</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 bg-gray-200 rounded"></span>
-                  <span>Q4 待空闲时</span>
-                </div>
-              </div>
-            </Card>
-          </div>
-        )}
+          <Button size="sm" onClick={() => setIsCreateModalOpen(true)}>
+            <Plus className="h-4 w-4" /> 创建需求
+          </Button>
+        </div>
       </div>
 
-      <Modal 
-        isOpen={isCreateModalOpen} 
+      {/* 看板视图 */}
+      {viewMode === 'kanban' && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {KANBAN_STATUSES.map((status) => {
+            const items = sortedRequirements.filter((r) => r.status === status);
+            const s = requirementStatus.style(status);
+            const isDragOver = dragOverStatus === status && draggingId !== null;
+            return (
+              <div
+                key={status}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (dragOverStatus !== status) setDragOverStatus(status);
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverStatus(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  handleDropOnColumn(status);
+                }}
+                className={`flex flex-col rounded-xl border bg-gray-50/60 transition-colors ${
+                  isDragOver ? 'border-accent-400 bg-accent-50/50 ring-2 ring-accent-200' : 'border-gray-200'
+                }`}
+              >
+                <div className="flex items-center justify-between px-3.5 py-2.5">
+                  <span className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                    <span className={`h-2 w-2 rounded-full ${s.dot}`} />
+                    {s.label}
+                  </span>
+                  <span className="rounded-full bg-gray-200/70 px-2 py-0.5 text-xs tabular-nums text-gray-500">
+                    {items.length}
+                  </span>
+                </div>
+                <div className="min-h-[80px] space-y-2 p-2 pt-0">
+                  {loading ? (
+                    Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-20" />)
+                  ) : items.length === 0 ? (
+                    <div className={`rounded-lg border border-dashed py-8 text-center text-xs ${
+                      isDragOver ? 'border-accent-300 text-accent-400' : 'border-gray-200 text-gray-300'
+                    }`}>
+                      {isDragOver ? '松开移动到此列' : '暂无需求'}
+                    </div>
+                  ) : (
+                    items.map((req) => (
+                      <div
+                        key={req.id}
+                        draggable
+                        onDragStart={(e) => {
+                          setDraggingId(req.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onDragEnd={() => {
+                          setDraggingId(null);
+                          setDragOverStatus(null);
+                        }}
+                        onClick={() => navigate(`/requirements/${req.id}`)}
+                        className={`group cursor-pointer rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition-all hover:border-gray-300 hover:shadow-md ${
+                          draggingId === req.id ? 'opacity-40' : ''
+                        }`}
+                      >
+                        <h4 className="text-sm font-medium leading-snug text-gray-800">{req.title}</h4>
+                        {req.description && (
+                          <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-gray-400">{req.description}</p>
+                        )}
+                        <div className="mt-2.5 flex items-center justify-between gap-2">
+                          <PriorityBadge value={req.priority} />
+                          <span className="text-xs tabular-nums text-gray-300">
+                            {req.created_at ? new Date(req.created_at).toLocaleDateString() : ''}
+                          </span>
+                        </div>
+                        {req.equipment_name && (
+                          <p className="mt-2 flex items-center gap-1.5 border-t border-gray-50 pt-2 text-xs text-gray-400">
+                            <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-accent-400" />
+                            <span className="truncate">{getEquipmentName(req.equipment_name)}</span>
+                          </p>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 四象限视图 */}
+      {viewMode === 'quadrant' && (
+        <div>
+          <div className="mb-3 flex items-center justify-center">
+            <span className="rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-500">
+              重要性（状态） →
+            </span>
+          </div>
+          <div className="flex">
+            <div className="flex w-8 flex-shrink-0 items-center justify-center">
+              <span className="whitespace-nowrap text-xs font-medium text-gray-400 [-writing-mode:vertical-rl] rotate-180">
+                ← 紧急度
+              </span>
+            </div>
+            <div className="grid flex-1 grid-cols-1 gap-3 md:grid-cols-2">
+              {quadrants.map((q) => {
+                const Icon = q.icon;
+                return (
+                  <div key={q.id} className={`flex flex-col rounded-xl ring-1 ${q.ring} bg-white overflow-hidden`}>
+                    <div className={`flex items-center gap-2 px-4 py-2.5 ${q.header}`}>
+                      <Icon className="h-4 w-4" />
+                      <span className="text-sm font-semibold">{q.title}</span>
+                      <span className="text-xs opacity-75">{q.subtitle}</span>
+                      <span className="ml-auto rounded-full bg-white/60 px-2 py-0.5 text-xs font-bold tabular-nums">
+                        {q.items.length}
+                      </span>
+                    </div>
+                    <div className="max-h-96 flex-1 space-y-2 overflow-y-auto p-2.5">
+                      {q.items.length === 0 ? (
+                        <div className="py-8 text-center text-xs text-gray-300">暂无需求</div>
+                      ) : (
+                        q.items.map((req) => (
+                          <div
+                            key={req.id}
+                            className={`cursor-pointer rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition-colors ${q.card}`}
+                            onClick={() => navigate(`/requirements/${req.id}`)}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="flex-1 text-sm font-medium leading-snug text-gray-800">{req.title}</span>
+                              <PriorityBadge value={req.priority} />
+                            </div>
+                            {req.description && (
+                              <p className="mt-1 line-clamp-2 text-xs text-gray-400">{req.description}</p>
+                            )}
+                            <div className="mt-2 flex items-center justify-between">
+                              <RequirementStatusBadge status={req.status} />
+                              <span className="truncate text-xs text-gray-300">{getEquipmentName(req.equipment_name) || '未关联机台'}</span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="mt-3 flex items-center justify-center gap-6 text-xs text-gray-400">
+            {quadrantConfig.map((q) => (
+              <span key={q.id} className="flex items-center gap-1.5">
+                <span className={`h-2.5 w-2.5 rounded ${q.dot}`} />
+                Q{q.id} {q.subtitle}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 创建需求弹窗 */}
+      <Modal
+        isOpen={isCreateModalOpen}
         onClose={() => {
           setIsCreateModalOpen(false);
           setFormData({ title: '', description: '' });
-        }} 
+        }}
         title="创建需求"
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">需求标题 *</label>
+            <label className="mb-1 block text-sm font-medium text-gray-700">需求标题 *</label>
             <input
               type="text"
               value={formData.title}
               onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              className={`${inputCls} w-full`}
               placeholder="请输入需求标题"
+              autoFocus
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">优先级</label>
-            <select
-              value={formData.priority}
-              onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-            >
-              <option value="low">低</option>
-              <option value="medium">中</option>
-              <option value="high">高</option>
-              <option value="critical">紧急</option>
-            </select>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">优先级</label>
+              <select
+                value={formData.priority || 'medium'}
+                onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                className={`${inputCls} w-full`}
+              >
+                {['low', 'medium', 'high', 'critical'].map((p) => (
+                  <option key={p} value={p}>{priority.label(p)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">关联项目</label>
+              <select
+                value={formData.project_id || ''}
+                onChange={(e) => setFormData({ ...formData, project_id: parseInt(e.target.value) || undefined })}
+                className={`${inputCls} w-full`}
+              >
+                <option value="">不关联项目</option>
+                {projects.map((item) => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">关联项目</label>
-            <select
-              value={formData.project_id}
-              onChange={(e) => setFormData({ ...formData, project_id: parseInt(e.target.value) || undefined })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
-            >
-              <option value="">不关联项目</option>
-              {projects.map((item) => (
-                <option key={item.id} value={item.id}>{item.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">关联机台</label>
+            <label className="mb-1 block text-sm font-medium text-gray-700">关联机台</label>
             <select
               value={formData.equipment_name ?? ''}
               onChange={(e) => setFormData({ ...formData, equipment_name: e.target.value || undefined })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              className={`${inputCls} w-full`}
             >
               <option value="">不关联机台</option>
               {equipment.map((item) => {
                 const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
                 return (
-                  <option key={eqKey} value={eqKey}>{item.eq_name} ({item.ap_name})</option>
+                  <option key={eqKey} value={eqKey}>{item.eq_name || item.equipment}（{item.ap_name}）</option>
                 );
               })}
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">需求描述</label>
+            <label className="mb-1 block text-sm font-medium text-gray-700">需求描述</label>
             <textarea
               value={formData.description}
               onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500 resize-none"
+              className={`${inputCls} w-full resize-none`}
               rows={4}
               placeholder="请输入需求描述..."
             />
           </div>
-          <div className="flex items-center justify-end gap-3 pt-4">
+          <div className="flex items-center justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={() => setIsCreateModalOpen(false)}>
               取消
             </Button>

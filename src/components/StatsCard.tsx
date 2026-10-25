@@ -5,54 +5,39 @@ interface StatsCardProps {
   value: string | number;
   icon: ReactNode;
   trend?: { value: number; label: string };
-  color: 'cyan' | 'green' | 'orange' | 'purple';
+  color: 'accent' | 'green' | 'orange' | 'purple';
+  onClick?: () => void;
 }
 
 const colorStyles = {
-  cyan: {
-    bg: 'bg-cyan-50',
-    icon: 'text-cyan-600',
-    border: 'border-cyan-100',
-  },
-  green: {
-    bg: 'bg-green-50',
-    icon: 'text-green-600',
-    border: 'border-green-100',
-  },
-  orange: {
-    bg: 'bg-orange-50',
-    icon: 'text-orange-600',
-    border: 'border-orange-100',
-  },
-  purple: {
-    bg: 'bg-purple-50',
-    icon: 'text-purple-600',
-    border: 'border-purple-100',
-  },
+  accent: { bg: 'bg-accent-50', icon: 'text-accent-600' },
+  green: { bg: 'bg-emerald-50', icon: 'text-emerald-600' },
+  orange: { bg: 'bg-amber-50', icon: 'text-amber-600' },
+  purple: { bg: 'bg-purple-50', icon: 'text-purple-600' },
 };
 
-export default function StatsCard({ title, value, icon, trend, color }: StatsCardProps) {
+export default function StatsCard({ title, value, icon, trend, color, onClick }: StatsCardProps) {
   const styles = colorStyles[color];
-  
+
   return (
-    <div className={`bg-white border ${styles.border} rounded-xl p-5 transition-all duration-300 hover:scale-[1.02] hover:shadow-lg`}>
-      <div className="flex items-start justify-between">
-        <div className={`p-3 rounded-lg ${styles.bg}`}>
-          <div className={styles.icon}>{icon}</div>
+    <div
+      onClick={onClick}
+      className={`rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-shadow ${
+        onClick ? 'cursor-pointer hover:border-gray-300 hover:shadow-md' : ''
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${styles.bg} ${styles.icon}`}>
+          {icon}
         </div>
         {trend && (
-          <div className={`flex items-center gap-1 text-xs font-medium ${
-            trend.value >= 0 ? 'text-green-600' : 'text-red-600'
-          }`}>
-            <span>{trend.value >= 0 ? '+' : ''}{trend.value}%</span>
-            <span className="text-gray-500">{trend.label}</span>
-          </div>
+          <span className={`text-xs font-medium ${trend.value >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+            {trend.value >= 0 ? '+' : ''}{trend.value}% {trend.label}
+          </span>
         )}
       </div>
-      <div className="mt-4">
-        <p className="text-2xl font-bold text-gray-800">{value}</p>
-        <p className="text-sm text-gray-500 mt-1">{title}</p>
-      </div>
+      <p className="mt-3 text-2xl font-semibold tabular-nums text-gray-900">{value}</p>
+      <p className="mt-0.5 text-xs text-gray-400">{title}</p>
     </div>
   );
 }

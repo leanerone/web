@@ -195,7 +195,7 @@ export interface CreateRequirementRequest {
 
 export interface AIPlanRequest {
   input: string;
-  tasks?: Task[];
+  tasks?: Partial<Task>[];
   projects?: Project[];
 }
 

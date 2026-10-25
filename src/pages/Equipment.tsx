@@ -2,10 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Cpu,
   Search,
-  Filter,
   RefreshCw,
-  Database,
-  Eye,
   Download,
   Github,
   Copy,
@@ -15,19 +12,24 @@ import {
   Plus,
   Trash2,
   ExternalLink,
+  Database,
+  Eye,
 } from 'lucide-react';
-import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
+import { EquipmentStatusBadge } from '@/components/ui/Badge';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { toast } from '@/components/ui/Toast';
 import { useNavigate } from 'react-router-dom';
 import { equipmentAPI, settingsAPI } from '@/services/api';
 import useAppStore from '@/stores/appStore';
 import type { Equipment } from '@/types';
 
-const mockEquipment: Equipment[] = [];
+const inputCls =
+  'rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-800 placeholder-gray-400 transition-colors focus:border-accent-500 focus:bg-white focus:outline-none';
 
 // 默认 Git Source 映射 (后端 SYSTEM_SETTINGS 未加载成功时的 fallback)
-// key = "equipment_type|equipment_model" (按机台类型+型号区分源码, 不再用 SOURCECODE)
+// key = "equipment_type|equipment_model"
 const DEFAULT_GIT_BASE_URL = 'https://github.com/leanerone/web/blob/main/equipment';
 const DEFAULT_GIT_SOURCE_MAP: Record<string, string> = {
   'CPC|ASM-8350V-LPT': 'cpc/asm_eagle',
@@ -47,31 +49,27 @@ function getSourceLineLabel(code?: string): string {
   }
 }
 
-// 构造 Git Source 映射 key: "equipment_type|equipment_model"
 function buildGitSourceKey(item: Equipment): string {
-  const t = String((item as any).equipment_type ?? item.eq_type ?? '').trim();
-  const m = String((item as any).equipment_model ?? item.eq_model ?? '').trim();
+  const t = String(item.equipment_type ?? item.eq_type ?? '').trim();
+  const m = String(item.equipment_model ?? item.eq_model ?? '').trim();
   return `${t}|${m}`;
 }
 
 export default function Equipment() {
   const navigate = useNavigate();
   const { setEquipment } = useAppStore();
-  const [equipmentList, setEquipmentList] = useState<Equipment[]>(mockEquipment);
+  const [equipmentList, setEquipmentList] = useState<Equipment[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  // Git Source 映射配置 (来自 SYSTEM_SETTINGS)
   const [gitBaseUrl, setGitBaseUrl] = useState<string>(DEFAULT_GIT_BASE_URL);
   const [gitSourceMap, setGitSourceMap] = useState<Record<string, string>>(DEFAULT_GIT_SOURCE_MAP);
-  // Git Source 编辑弹窗
   const [isGitModalOpen, setIsGitModalOpen] = useState(false);
   const [gitEditBaseUrl, setGitEditBaseUrl] = useState('');
   const [gitEditMap, setGitEditMap] = useState<Array<{ code: string; path: string }>>([]);
   const [gitSaving, setGitSaving] = useState(false);
-  // 复制成功提示
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   /** 加载机台列表 + Git Source 映射 (并行) */
@@ -80,24 +78,24 @@ export default function Equipment() {
     try {
       const [eqRes, setRes] = await Promise.all([
         equipmentAPI.list({ page: 1, limit: 1000 }),
-        settingsAPI.list('equipment').catch(() => ({ success: false, data: [] as any[] })),
+        settingsAPI.list('equipment').catch(() => ({ success: false, data: [] as { key: string; value: string }[] })),
       ]);
       if (eqRes.success) {
         setEquipmentList(eqRes.data);
         setEquipment(eqRes.data);
+      } else {
+        toast.error(eqRes.message || '机台列表加载失败');
       }
-      // 解析 system_settings 中 equipment 分类
       if (setRes.success && Array.isArray(setRes.data)) {
-        const baseRow = setRes.data.find((s: any) => s.key === 'git_source_base_url');
-        const mapRow  = setRes.data.find((s: any) => s.key === 'git_source_map');
+        const baseRow = setRes.data.find((s) => s.key === 'git_source_base_url');
+        const mapRow = setRes.data.find((s) => s.key === 'git_source_map');
         if (baseRow?.value) setGitBaseUrl(baseRow.value);
         if (mapRow?.value) {
           try { setGitSourceMap(JSON.parse(mapRow.value)); } catch { /* 保持默认 */ }
         }
       }
     } catch {
-      setEquipmentList(mockEquipment);
-      setEquipment(mockEquipment);
+      toast.error('机台列表加载失败，量产环境需配置 PANJOB 数据库连接');
     } finally {
       setLoading(false);
     }
@@ -105,30 +103,15 @@ export default function Equipment() {
 
   useEffect(() => {
     fetchEquipment();
-  }, [setEquipment]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchEquipment();
-    setTimeout(() => setRefreshing(false), 500);
+    setRefreshing(false);
   };
 
-  const handleExport = () => {
-    const headers = ['机台编号','机台类型','机台型号','厂区','产线','CC服务器','负责人','操作系统','服务器类型','SOURCE源码分类','状态','位置','GitURL'];
-    const rows = filteredEquipment.map(item => [
-      item.eq_name, item.eq_type, item.eq_model, item.area, (item as any).line ?? '',
-      item.server_id, (item as any).chargeman ?? '', (item as any).os ?? '', item.driver_type,
-      (item as any).source_code ?? '', item.status, item.location, buildGitUrl(item as any),
-    ]);
-    const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g,'""')}"`).join(','))].join('\n');
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `equipment_list_${new Date().toISOString().split('T')[0]}.csv`;
-    link.click();
-  };
-
-  /** 根据 equipment_type + equipment_model 拼接 Git URL */
   const buildGitUrl = (item: Equipment): string => {
     const key = buildGitSourceKey(item);
     if (!key || key === '|') return '';
@@ -137,51 +120,59 @@ export default function Equipment() {
     return `${gitBaseUrl.replace(/\/$/, '')}/${sub}`;
   };
 
-  /** 复制机台编号到剪贴板 */
+  const handleExport = () => {
+    const headers = ['机台编号', '机台类型', '机台型号', '厂区', '产线', 'CC服务器', '负责人', '操作系统', '服务器类型', 'SOURCE源码分类', '状态', '位置', 'GitURL'];
+    const rows = filteredEquipment.map((item) => [
+      item.eq_name, item.eq_type, item.eq_model, item.area, item.line ?? '',
+      item.server_id, item.chargeman ?? '', item.os ?? '', item.driver_type,
+      item.source_code ?? '', item.status, item.location, buildGitUrl(item),
+    ]);
+    const csv = [headers.join(','), ...rows.map((r) => r.map((v) => `"${String(v ?? '').replace(/"/g, '""')}"`).join(','))].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `equipment_list_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    toast.success('已导出 CSV');
+  };
+
   const handleCopyCode = async (item: Equipment) => {
     const text = item.eq_name || item.equipment || String(item.id);
     const key = String(item.equipment ?? item.id ?? item.eq_name);
     try {
       await navigator.clipboard.writeText(text);
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 1500);
-    } catch (err) {
-      console.error('复制失败:', err);
-      // fallback: 用 textarea
+    } catch {
       const ta = document.createElement('textarea');
       ta.value = text;
       document.body.appendChild(ta);
       ta.select();
-      try { document.execCommand('copy'); } catch {}
+      try { document.execCommand('copy'); } catch { /* 忽略 */ }
       document.body.removeChild(ta);
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 1500);
     }
+    setCopiedKey(key);
+    toast.success(`已复制 ${text}`);
+    setTimeout(() => setCopiedKey(null), 1500);
   };
 
-  /** 跳转到该机台关联的需求列表 */
   const handleViewRequirements = (item: Equipment) => {
     const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
     navigate(`/requirements?equipment=${encodeURIComponent(eqKey)}`);
   };
 
-  /** 打开 Git Source 配置弹窗，初始化编辑数据 */
   const openGitModal = () => {
     setGitEditBaseUrl(gitBaseUrl);
     setGitEditMap(Object.entries(gitSourceMap).map(([code, path]) => ({ code, path })));
     setIsGitModalOpen(true);
   };
 
-  /** 保存 Git Source 配置到后端 SYSTEM_SETTINGS */
   const handleGitSave = async () => {
     setGitSaving(true);
     try {
-      // 过滤空行
       const filtered = gitEditMap.filter((r) => r.code.trim() && r.path.trim());
       const newMap: Record<string, string> = {};
       filtered.forEach((r) => { newMap[r.code.trim()] = r.path.trim(); });
       const baseUrl = gitEditBaseUrl.trim() || DEFAULT_GIT_BASE_URL;
-      // 并行保存 base_url 和 map
       await Promise.all([
         settingsAPI.update('git_source_base_url', baseUrl, 'Git Source 根地址', 'equipment'),
         settingsAPI.update('git_source_map', JSON.stringify(newMap), 'EquipmentType|Model -> Git 子路径映射', 'equipment'),
@@ -189,310 +180,274 @@ export default function Equipment() {
       setGitBaseUrl(baseUrl);
       setGitSourceMap(newMap);
       setIsGitModalOpen(false);
-    } catch (err) {
-      console.error('保存 Git Source 配置失败:', err);
-      alert('保存失败，请重试');
+      toast.success('Git Source 配置已保存');
+    } catch {
+      toast.error('保存失败，请重试');
     } finally {
       setGitSaving(false);
     }
   };
 
-  // 获取所有机型用于筛选
   const equipmentTypes = useMemo(
-    () => [...new Set(equipmentList.map(e => e.eq_type).filter(Boolean))],
+    () => [...new Set(equipmentList.map((e) => e.eq_type).filter(Boolean))],
     [equipmentList],
   );
 
   const filteredEquipment = useMemo(() => equipmentList.filter((item) => {
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch = !q ||
-      item.eq_name.toLowerCase().includes(q) ||
-      item.ap_name.toLowerCase().includes(q) ||
-      item.eq_model.toLowerCase().includes(q) ||
-      item.vendor.toLowerCase().includes(q) ||
-      item.server_id.toLowerCase().includes(q) ||
-      ((item as any).chargeman ?? '').toLowerCase().includes(q) ||
-      ((item as any).source_code ?? '').includes(q);
-    const matchesType   = typeFilter === 'all'   || item.eq_type === typeFilter;
+      item.eq_name?.toLowerCase().includes(q) ||
+      item.ap_name?.toLowerCase().includes(q) ||
+      item.eq_model?.toLowerCase().includes(q) ||
+      item.vendor?.toLowerCase().includes(q) ||
+      item.server_id?.toLowerCase().includes(q) ||
+      (item.chargeman ?? '').toLowerCase().includes(q) ||
+      (item.source_code ?? '').includes(q);
+    const matchesType = typeFilter === 'all' || item.eq_type === typeFilter;
     const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
     return matchesSearch && matchesType && matchesStatus;
   }), [equipmentList, searchQuery, typeFilter, statusFilter]);
 
-  const getStatusColor = (status: string) => {
-    const colors: Record<string, string> = {
-      online: 'bg-green-50 text-green-600',
-      offline: 'bg-red-50 text-red-600',
-      maintenance: 'bg-orange-50 text-orange-600',
-      decommissioned: 'bg-gray-100 text-gray-500',
-    };
-    return colors[status] || 'bg-gray-100 text-gray-500';
-  };
+  const stats = useMemo(() => ([
+    { label: '机台总数', value: equipmentList.length, tone: 'bg-accent-50 text-accent-600' },
+    { label: '在线', value: equipmentList.filter((e) => e.status === 'online').length, tone: 'bg-emerald-50 text-emerald-600' },
+    { label: '维护中', value: equipmentList.filter((e) => e.status === 'maintenance').length, tone: 'bg-amber-50 text-amber-600' },
+    { label: '离线', value: equipmentList.filter((e) => e.status === 'offline').length, tone: 'bg-red-50 text-red-600' },
+    { label: '机型数', value: equipmentTypes.length, tone: 'bg-blue-50 text-blue-600' },
+    { label: '有 Git 源码', value: equipmentList.filter((e) => buildGitUrl(e)).length, tone: 'bg-violet-50 text-violet-600' },
+  ]), [equipmentList, equipmentTypes, gitBaseUrl, gitSourceMap]);
 
-  const getStatusLabel = (status: string) => {
-    const labels: Record<string, string> = {
-      online: '在线',
-      offline: '离线',
-      maintenance: '维护中',
-      decommissioned: '已退役',
-    };
-    return labels[status] || status;
-  };
-
-  const COL_COUNT = 14;  // 表头列数 (用于骨架屏 & 空表 colSpan)
+  const COL_COUNT = 14;
 
   return (
-    <div className="animate-fade-in">
-      <div className="p-6">
-        {/* 数据来源提示 */}
-        <div className="mb-4 p-3 bg-cyan-50 border border-cyan-200 rounded-lg flex items-start gap-2">
-          <Database className="w-4 h-4 text-cyan-600 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-cyan-700">
-            <p className="font-medium">机台数据来源说明：</p>
-            <p>量产环境：后端 ORM 直接映射 <code className="bg-white px-1 rounded border border-cyan-200">PANJOB.EQUIPMENTINFO</code> 量产表 (用 PANJOB 账号直连)，前端只读展示，不会修改量产数据。</p>
-            <p>主键: <code>EQUIPMENT</code> (机台编号) ｜ 状态: 由 OS 字段派生 (Win → 在线, 其他 → 维护, NULL → 离线)</p>
+    <div className="animate-fade-in space-y-4">
+      {/* 数据来源说明（精简为一行） */}
+      <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3.5 py-2 text-xs text-gray-500">
+        <Database className="h-3.5 w-3.5 flex-shrink-0 text-accent-500" />
+        <span>
+          量产数据只读直连 <code className="rounded bg-gray-100 px-1 font-mono">PANJOB.EQUIPMENTINFO</code>，
+          主键 EQUIPMENT，状态由 OS 字段派生（Win → 在线），不会修改量产数据
+        </span>
+      </div>
+
+      {/* 统计条 */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {stats.map((s) => (
+          <div key={s.label} className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
+            <p className={`inline-flex rounded-lg px-2 py-0.5 text-lg font-semibold tabular-nums ${s.tone}`}>{s.value}</p>
+            <p className="mt-1 text-xs text-gray-400">{s.label}</p>
           </div>
+        ))}
+      </div>
+
+      {/* 工具栏 */}
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-1 flex-wrap items-center gap-2">
+          <div className="relative min-w-[220px] flex-1 sm:max-w-md">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="搜索编号 / 类型 / 型号 / 负责人 / SOURCE..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className={`${inputCls} w-full pl-9`}
+            />
+          </div>
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className={`${inputCls} sm:w-40`}>
+            <option value="all">全部机台类型</option>
+            {equipmentTypes.map((type) => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={`${inputCls} sm:w-32`}>
+            <option value="all">全部状态</option>
+            <option value="online">在线</option>
+            <option value="offline">离线</option>
+            <option value="maintenance">维护中</option>
+            <option value="decommissioned">已停用</option>
+          </select>
         </div>
-
-        <Card className="mb-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input
-                  type="text"
-                  placeholder="搜索机台编号/类型/型号/CC服务器/负责人/SOURCECODE..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 placeholder-gray-400 focus:outline-none focus:border-cyan-500 w-full sm:w-96"
-                />
-              </div>
-              <div className="relative">
-                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <select
-                  value={typeFilter}
-                  onChange={(e) => setTypeFilter(e.target.value)}
-                  className="pl-10 pr-8 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500 appearance-none w-full sm:w-44"
-                >
-                  <option value="all">全部机台类型</option>
-                  {equipmentTypes.map(type => (
-                    <option key={type} value={type}>{type}</option>
-                  ))}
-                </select>
-              </div>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 focus:outline-none focus:border-cyan-500 appearance-none w-full sm:w-36"
-              >
-                <option value="all">全部状态</option>
-                <option value="online">在线</option>
-                <option value="offline">离线</option>
-                <option value="maintenance">维护中</option>
-                <option value="decommissioned">已退役</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" onClick={handleRefresh} loading={refreshing}>
-                <RefreshCw className="w-4 h-4" />
-                刷新
-              </Button>
-              <Button variant="secondary" onClick={handleExport}>
-                <Download className="w-4 h-4" />
-                导出CSV
-              </Button>
-              <Button variant="secondary" onClick={openGitModal}>
-                <Settings className="w-4 h-4" />
-                Git Source 配置
-              </Button>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="overflow-x-auto" title={`机台列表 (共 ${filteredEquipment.length} 台)`}>
-          <table className="w-full min-w-[1600px]">
-            <thead>
-              <tr className="text-left text-xs font-medium text-gray-500 border-b border-gray-200 bg-gray-50">
-                <th className="py-3 px-3 whitespace-nowrap">机台编号</th>
-                <th className="py-3 px-3 whitespace-nowrap">类型</th>
-                <th className="py-3 px-3 whitespace-nowrap">型号</th>
-                <th className="py-3 px-3 whitespace-nowrap">厂区</th>
-                <th className="py-3 px-3 whitespace-nowrap">产线</th>
-                <th className="py-3 px-3 whitespace-nowrap">CC服务器</th>
-                <th className="py-3 px-3 whitespace-nowrap">负责人</th>
-                <th className="py-3 px-3 whitespace-nowrap">操作系统</th>
-                <th className="py-3 px-3 whitespace-nowrap">服务器类型</th>
-                <th className="py-3 px-3 whitespace-nowrap">SOURCE</th>
-                <th className="py-3 px-3 whitespace-nowrap">状态</th>
-                <th className="py-3 px-3 whitespace-nowrap">位置</th>
-                <th className="py-3 px-3 whitespace-nowrap text-center">源码</th>
-                <th className="py-3 px-3 whitespace-nowrap text-center">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                [...Array(6)].map((_, i) => (
-                  <tr key={i} className="border-b border-gray-100">
-                    {[...Array(COL_COUNT)].map((_, j) => (
-                      <td key={j} className="py-3 px-3">
-                        <div className="w-24 h-4 bg-gray-100 rounded animate-pulse" />
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              ) : filteredEquipment.length === 0 ? (
-                <tr className="border-b border-gray-100">
-                  <td colSpan={COL_COUNT} className="py-12 text-center">
-                    <Cpu className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                    <p className="text-gray-500">暂无机台记录（确认后端 EQUIPMENT 视图或表是否有数据）</p>
-                  </td>
-                </tr>
-              ) : (
-                filteredEquipment.map((item) => {
-                  const gitUrl = buildGitUrl(item as any);
-                  const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
-                  const isCopied = copiedKey === eqKey;
-                  return (
-                    <tr key={eqKey} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                      <td className="py-3 px-3 text-sm font-medium text-cyan-600 whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1.5">
-                          {item.eq_name}
-                          <button
-                            onClick={() => handleCopyCode(item)}
-                            title="复制机台编号"
-                            className="inline-flex items-center justify-center w-6 h-6 rounded text-gray-400 hover:bg-cyan-50 hover:text-cyan-600 transition-colors"
-                          >
-                            {isCopied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                          </button>
-                        </div>
-                      </td>
-                      <td className="py-3 px-3 text-sm text-gray-700 whitespace-nowrap">{item.eq_type}</td>
-                      <td className="py-3 px-3 text-sm text-gray-700 whitespace-nowrap">{item.eq_model}</td>
-                      <td className="py-3 px-3 text-sm text-gray-600 whitespace-nowrap">{item.area || '-'}</td>
-                      <td className="py-3 px-3 text-sm text-gray-600 whitespace-nowrap">{(item as any).line || '-'}</td>
-                      <td className="py-3 px-3 text-sm text-gray-600 whitespace-nowrap font-mono">{item.server_id || '-'}</td>
-                      <td className="py-3 px-3 text-sm text-gray-600 whitespace-nowrap">{(item as any).chargeman || '-'}</td>
-                      <td className="py-3 px-3 text-sm text-gray-600 whitespace-nowrap">{(item as any).os || '-'}</td>
-                      <td className="py-3 px-3 text-sm text-gray-600 whitespace-nowrap">{item.driver_type || '-'}</td>
-                      <td className="py-3 px-3 text-sm whitespace-nowrap">
-                        {(item as any).source_code ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-violet-50 text-violet-700 border border-violet-100" title={`SOURCECODE=${(item as any).source_code} (产线区分)`}>
-                            <span className="font-mono">{(item as any).source_code}</span>
-                            <span className="text-violet-400">·</span>
-                            <span>{getSourceLineLabel((item as any).source_code)}</span>
-                          </span>
-                        ) : (
-                          <span className="text-gray-300">-</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 whitespace-nowrap">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${getStatusColor(item.status)}`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${item.status === 'online' ? 'bg-green-500' : item.status === 'maintenance' ? 'bg-orange-500' : 'bg-red-500'}`} />
-                          {getStatusLabel(item.status)}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-xs text-gray-500 whitespace-nowrap max-w-[280px] truncate" title={item.location}>{item.location || '-'}</td>
-                      <td className="py-3 px-3 whitespace-nowrap text-center">
-                        {gitUrl ? (
-                          <a
-                            href={gitUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={`打开 Git 源码: ${gitUrl}`}
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-sky-600 hover:bg-sky-50 hover:text-sky-700 transition-colors"
-                          >
-                            <Github className="w-4 h-4" />
-                          </a>
-                        ) : (
-                          <span className="inline-block w-8 h-8 rounded-md bg-gray-50 text-gray-300 flex items-center justify-center cursor-not-allowed" title="该机台 Type|Model 未配置 Git 子路径映射，点击右上角'Git Source 配置'添加">
-                            <Github className="w-4 h-4 opacity-40" />
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 whitespace-nowrap text-center">
-                        <div className="inline-flex items-center gap-1">
-                          <Button variant="ghost" size="sm" onClick={() => navigate(`/equipment/${encodeURIComponent(eqKey)}`)} title="查看详情">
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                          <button
-                            onClick={() => handleViewRequirements(item)}
-                            title="查看关联需求"
-                            className="inline-flex items-center justify-center w-8 h-8 rounded-md text-emerald-600 hover:bg-emerald-50 hover:text-emerald-700 transition-colors"
-                          >
-                            <Link2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </Card>
-
-        <div className="mt-6">
-          <Card title="机台统计">
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-              <div className="p-4 bg-cyan-50 rounded-lg text-center">
-                <p className="text-2xl font-bold text-cyan-600">{equipmentList.length}</p>
-                <p className="text-sm text-gray-600 mt-1">机台总数</p>
-              </div>
-              <div className="p-4 bg-green-50 rounded-lg text-center">
-                <p className="text-2xl font-bold text-green-600">{equipmentList.filter(e => e.status === 'online').length}</p>
-                <p className="text-sm text-gray-600 mt-1">在线</p>
-              </div>
-              <div className="p-4 bg-orange-50 rounded-lg text-center">
-                <p className="text-2xl font-bold text-orange-600">{equipmentList.filter(e => e.status === 'maintenance').length}</p>
-                <p className="text-sm text-gray-600 mt-1">维护中</p>
-              </div>
-              <div className="p-4 bg-red-50 rounded-lg text-center">
-                <p className="text-2xl font-bold text-red-600">{equipmentList.filter(e => e.status === 'offline').length}</p>
-                <p className="text-sm text-gray-600 mt-1">离线</p>
-              </div>
-              <div className="p-4 bg-blue-50 rounded-lg text-center">
-                <p className="text-2xl font-bold text-blue-600">{equipmentTypes.length}</p>
-                <p className="text-sm text-gray-600 mt-1">机型数</p>
-              </div>
-              <div className="p-4 bg-violet-50 rounded-lg text-center">
-                <p className="text-2xl font-bold text-violet-600">{equipmentList.filter((e) => buildGitUrl(e)).length}</p>
-                <p className="text-sm text-gray-600 mt-1">有 Git 源码</p>
-              </div>
-            </div>
-          </Card>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={handleRefresh} loading={refreshing}>
+            <RefreshCw className="h-4 w-4" /> 刷新
+          </Button>
+          <Button variant="secondary" size="sm" onClick={handleExport} disabled={filteredEquipment.length === 0}>
+            <Download className="h-4 w-4" /> 导出 CSV
+          </Button>
+          <Button variant="secondary" size="sm" onClick={openGitModal}>
+            <Settings className="h-4 w-4" /> Git Source 配置
+          </Button>
         </div>
       </div>
 
+      {/* 机台表格 */}
+      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+        <table className="w-full min-w-[1600px] text-sm">
+          <thead>
+            <tr className="border-b border-gray-100 bg-gray-50/60 text-left text-xs font-medium text-gray-500">
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">机台编号</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">类型</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">型号</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">厂区</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">产线</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">CC服务器</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">负责人</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">操作系统</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">服务器类型</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">SOURCE</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">状态</th>
+              <th className="whitespace-nowrap px-3 py-2.5 font-medium">位置</th>
+              <th className="whitespace-nowrap px-3 py-2.5 text-center font-medium">源码</th>
+              <th className="whitespace-nowrap px-3 py-2.5 text-center font-medium">操作</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {loading ? (
+              Array.from({ length: 6 }).map((_, i) => (
+                <tr key={i}>
+                  {Array.from({ length: COL_COUNT }).map((_, j) => (
+                    <td key={j} className="px-3 py-3"><Skeleton className="h-4 w-24" /></td>
+                  ))}
+                </tr>
+              ))
+            ) : filteredEquipment.length === 0 ? (
+              <tr>
+                <td colSpan={COL_COUNT} className="py-14 text-center">
+                  <Cpu className="mx-auto mb-3 h-10 w-10 text-gray-200" />
+                  <p className="text-sm text-gray-400">暂无机台记录</p>
+                  <p className="mt-1 text-xs text-gray-300">量产环境需在后端配置 PANJOB 数据库连接；本地模式可先导入机台 CSV</p>
+                </td>
+              </tr>
+            ) : (
+              filteredEquipment.map((item) => {
+                const gitUrl = buildGitUrl(item);
+                const eqKey = String(item.equipment ?? item.id ?? item.eq_name);
+                const isCopied = copiedKey === eqKey;
+                return (
+                  <tr key={eqKey} className="group transition-colors hover:bg-gray-50">
+                    <td className="whitespace-nowrap px-3 py-2.5">
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          onClick={() => navigate(`/equipment/${encodeURIComponent(eqKey)}`)}
+                          className="font-medium text-accent-600 hover:text-accent-700 hover:underline"
+                          title="查看详情"
+                        >
+                          {item.eq_name}
+                        </button>
+                        <button
+                          onClick={() => handleCopyCode(item)}
+                          title="复制机台编号"
+                          className="rounded p-1 text-gray-300 transition-colors hover:bg-accent-50 hover:text-accent-600"
+                        >
+                          {isCopied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-gray-700">{item.eq_type || '-'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-gray-700">{item.eq_model || '-'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-gray-500">{item.area || '-'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-gray-500">{item.line || '-'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs text-gray-500">{item.server_id || '-'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-gray-500">{item.chargeman || '-'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-gray-500">{item.os || '-'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-gray-500">{item.driver_type || '-'}</td>
+                    <td className="whitespace-nowrap px-3 py-2.5">
+                      {item.source_code ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-md border border-violet-100 bg-violet-50 px-1.5 py-0.5 text-xs font-medium text-violet-700"
+                          title={`SOURCECODE=${item.source_code}（产线区分）`}
+                        >
+                          <span className="font-mono">{item.source_code}</span>
+                          <span className="text-violet-400">·</span>
+                          <span>{getSourceLineLabel(item.source_code)}</span>
+                        </span>
+                      ) : (
+                        <span className="text-gray-300">-</span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5">
+                      <EquipmentStatusBadge status={item.status} />
+                    </td>
+                    <td className="max-w-[240px] truncate whitespace-nowrap px-3 py-2.5 text-xs text-gray-400" title={item.location}>
+                      {item.location || '-'}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-center">
+                      {gitUrl ? (
+                        <a
+                          href={gitUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={`打开 Git 源码: ${gitUrl}`}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-800"
+                        >
+                          <Github className="h-4 w-4" />
+                        </a>
+                      ) : (
+                        <span
+                          className="inline-flex h-7 w-7 cursor-not-allowed items-center justify-center rounded-md text-gray-200"
+                          title="该机台 Type|Model 未配置 Git 子路径映射，点击右上角「Git Source 配置」添加"
+                        >
+                          <Github className="h-4 w-4" />
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-center">
+                      <div className="inline-flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                        <button
+                          onClick={() => navigate(`/equipment/${encodeURIComponent(eqKey)}`)}
+                          title="查看详情"
+                          className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-accent-600"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => handleViewRequirements(item)}
+                          title="查看关联需求"
+                          className="rounded-md p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-emerald-600"
+                        >
+                          <Link2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
       {/* Git Source 配置弹窗 */}
-      <Modal
-        isOpen={isGitModalOpen}
-        onClose={() => setIsGitModalOpen(false)}
-        title="Git Source 配置"
-      >
+      <Modal isOpen={isGitModalOpen} onClose={() => setIsGitModalOpen(false)} title="Git Source 配置" size="lg">
         <div className="space-y-5">
-          <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-lg text-sm text-cyan-700">
-            <p className="font-medium mb-1">配置说明</p>
-            <p>按 <b>EquipmentType | EquipmentModel</b> 区分源码，最终源码 URL = {gitEditBaseUrl || 'https://...'}<span className="text-violet-600">/[子路径]</span></p>
-            <p className="mt-1 text-xs text-cyan-600">SOURCECODE 字段保留 0/1/2 产线区分功能不变。例：key = CPC|ASM-8350V-LPT，子路径 = cpc/asm_eagle</p>
+          <div className="rounded-lg bg-accent-50 p-3 text-sm text-accent-700">
+            <p className="mb-1 font-medium">配置说明</p>
+            <p>
+              按 <b>EquipmentType | EquipmentModel</b> 区分源码，
+              最终源码 URL = {gitEditBaseUrl || 'https://...'}<span className="font-mono">/[子路径]</span>
+            </p>
+            <p className="mt-1 text-xs text-accent-600">
+              SOURCECODE 字段保留 0/1/2 产线区分功能。例：key = CPC|ASM-8350V-LPT，子路径 = cpc/asm_eagle
+            </p>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Git 仓库根地址</label>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Git 仓库根地址</label>
             <input
               type="url"
               value={gitEditBaseUrl}
               onChange={(e) => setGitEditBaseUrl(e.target.value)}
-              className="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg text-gray-800 focus:outline-none focus:border-cyan-500"
+              className={`${inputCls} w-full`}
               placeholder="https://github.com/yourorg/yourrepo/blob/main/equipment"
             />
           </div>
           <div>
-            <div className="flex items-center justify-between mb-2">
+            <div className="mb-2 flex items-center justify-between">
               <label className="block text-sm font-medium text-gray-700">Type|Model 映射表</label>
               <div className="flex items-center gap-1">
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => {
-                    // 从机台数据去重 type+model, 合并已有映射的 path
                     const existing = new Map(gitEditMap.map((r) => [r.code, r.path]));
                     const keys = new Set<string>();
                     equipmentList.forEach((eq) => {
@@ -502,24 +457,18 @@ export default function Equipment() {
                     const next = Array.from(keys).map((k) => ({ code: k, path: existing.get(k) || '' }));
                     setGitEditMap(next);
                   }}
-                  title="扫描机台数据, 按 EquipmentType+Model 去重生成映射行(保留已填路径)"
+                  title="扫描机台数据，按 EquipmentType+Model 去重生成映射行（保留已填路径）"
                 >
-                  <Database className="w-4 h-4" />
-                  从机台填充
+                  <Database className="h-4 w-4" /> 从机台填充
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setGitEditMap([...gitEditMap, { code: '', path: '' }])}
-                >
-                  <Plus className="w-4 h-4" />
-                  新增
+                <Button variant="ghost" size="sm" onClick={() => setGitEditMap([...gitEditMap, { code: '', path: '' }])}>
+                  <Plus className="h-4 w-4" /> 新增
                 </Button>
               </div>
             </div>
-            <div className="space-y-2 max-h-64 overflow-y-auto">
+            <div className="max-h-64 space-y-2 overflow-y-auto">
               {gitEditMap.length === 0 ? (
-                <p className="text-center text-sm text-gray-400 py-4">暂无映射，点击"从机台填充"自动生成或"新增"手动添加</p>
+                <p className="py-4 text-center text-sm text-gray-400">暂无映射，点击「从机台填充」自动生成或「新增」手动添加</p>
               ) : (
                 gitEditMap.map((row, idx) => (
                   <div key={idx} className="flex items-center gap-2">
@@ -531,10 +480,10 @@ export default function Equipment() {
                         next[idx] = { ...next[idx], code: e.target.value };
                         setGitEditMap(next);
                       }}
-                      className="w-52 px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 font-mono focus:outline-none focus:border-cyan-500"
+                      className={`${inputCls} w-56 font-mono`}
                       placeholder="EquipmentType|EquipmentModel"
                     />
-                    <span className="text-gray-400 text-sm">→</span>
+                    <span className="text-sm text-gray-300">→</span>
                     <input
                       type="text"
                       value={row.path}
@@ -543,15 +492,15 @@ export default function Equipment() {
                         next[idx] = { ...next[idx], path: e.target.value };
                         setGitEditMap(next);
                       }}
-                      className="flex-1 px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm text-gray-800 font-mono focus:outline-none focus:border-cyan-500"
+                      className={`${inputCls} flex-1 font-mono`}
                       placeholder="如 cpc/asm_eagle"
                     />
                     <button
                       onClick={() => setGitEditMap(gitEditMap.filter((_, i) => i !== idx))}
-                      className="inline-flex items-center justify-center w-8 h-8 rounded text-red-500 hover:bg-red-50 transition-colors"
+                      className="rounded p-2 text-red-400 transition-colors hover:bg-red-50 hover:text-red-500"
                       title="删除该映射"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                 ))
@@ -559,23 +508,18 @@ export default function Equipment() {
             </div>
           </div>
           {gitEditBaseUrl && gitEditMap.filter((r) => r.code && r.path).length > 0 && (
-            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-              <p className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-                <ExternalLink className="w-3 h-3" />
-                预览（首条映射）
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+              <p className="mb-1 flex items-center gap-1 text-xs text-gray-500">
+                <ExternalLink className="h-3 w-3" /> 预览（首条映射）
               </p>
-              <p className="text-sm font-mono text-sky-600 break-all">
+              <p className="break-all font-mono text-sm text-accent-600">
                 {gitEditBaseUrl.replace(/\/$/, '')}/{gitEditMap.find((r) => r.code && r.path)?.path}
               </p>
             </div>
           )}
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <Button variant="ghost" onClick={() => setIsGitModalOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={handleGitSave} disabled={gitSaving}>
-              {gitSaving ? '保存中...' : '保存配置'}
-            </Button>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button variant="ghost" onClick={() => setIsGitModalOpen(false)}>取消</Button>
+            <Button onClick={handleGitSave} loading={gitSaving}>保存配置</Button>
           </div>
         </div>
       </Modal>

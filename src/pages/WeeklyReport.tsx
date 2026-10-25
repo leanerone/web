@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { 
-  FileText, 
-  Plus, 
-  Search, 
+import {
+  FileText,
+  Plus,
+  Search,
   Calendar,
   Download,
   Edit,
@@ -10,65 +10,24 @@ import {
   Eye,
   Sparkles,
   Clock,
-  CheckCircle2,
-  TrendingUp,
 } from 'lucide-react';
 import Card from '@/components/Card';
 import Button from '@/components/Button';
 import Modal from '@/components/Modal';
+import EmptyState from '@/components/ui/EmptyState';
+import { Skeleton } from '@/components/ui/Skeleton';
+import { toast } from '@/components/ui/Toast';
 import { reportAPI, aiAPI } from '@/services/api';
-import useAppStore from '@/stores/appStore';
 import type { Report } from '@/types';
 
-const mockReports: Report[] = [
-  { id: 1, title: '2026年第28周工作周报', report_date: '2026-07-13', content: `## 本周工作总结
-
-### 项目进展
-1. **EAP系统升级v2.0** - 完成75%
-   - 完成API接口设计文档编写
-   - 数据库迁移脚本编写中
-   
-2. **Litho机台驱动优化** - 完成45%
-   - 性能测试报告分析完成
-   - 驱动代码优化进行中
-
-### 需求处理
-1. Lot Tracking功能增强 - 待处理
-2. EPI机台参数调整 - 处理中
-3. CMP设备驱动更新 - 处理中
-
-### 机台上线
-本周无新上机台
-
-### 下周计划
-1. 完成数据库迁移脚本
-2. 继续Litho驱动优化
-3. 处理Lot Tracking需求`, created_at: '2026-07-13', updated_at: '2026-07-13' },
-  { id: 2, title: '2026年第27周工作周报', report_date: '2026-07-06', content: `## 本周工作总结
-
-### 项目进展
-1. **EAP系统升级v2.0** - 完成65%
-   - 前端页面开发完成80%
-   
-2. **Litho机台驱动优化** - 完成35%
-   - 需求分析完成
-
-### 需求处理
-1. CMP设备驱动更新 - 已创建
-
-### 机台上线
-1. METRO-KLA-001 上线完成`, created_at: '2026-07-06', updated_at: '2026-07-06' },
-];
-
 export default function WeeklyReport() {
-  const { reports, setReports, addReport, updateReport, deleteReport } = useAppStore();
-  const [reportList, setReportList] = useState<Report[]>(mockReports);
+  const [reportList, setReportList] = useState<Report[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
   const [selectedReport, setSelectedReport] = useState<Report | null>(null);
   const [formData, setFormData] = useState<Partial<Report>>({ title: '', content: '' });
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [aiLoading, setAiLoading] = useState(false);
 
   useEffect(() => {
@@ -77,15 +36,17 @@ export default function WeeklyReport() {
         const res = await reportAPI.list();
         if (res.success) {
           setReportList(res.data);
-          setReports(res.data);
+        } else {
+          toast.error(res.message || '周报列表加载失败');
         }
       } catch {
-        setReportList(mockReports);
-        setReports(mockReports);
+        toast.error('周报列表加载失败，请检查后端服务');
+      } finally {
+        setLoading(false);
       }
     };
     fetchReports();
-  }, [setReports]);
+  }, []);
 
   const filteredReports = reportList.filter((report) => {
     return report.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -94,37 +55,46 @@ export default function WeeklyReport() {
 
   const handleCreate = async () => {
     if (!formData.title || !formData.content) return;
+    setLoading(true);
     try {
-      const res = await reportAPI.create(formData);
-      if (res.success) {
-        addReport(res.data);
-        setReportList((prev) => [res.data, ...prev]);
+      if (formData.id) {
+        const res = await reportAPI.update(formData.id, formData);
+        if (res.success) {
+          setReportList((prev) => prev.map((r) => (r.id === formData.id ? res.data : r)));
+          toast.success('周报已保存');
+        } else {
+          toast.error(res.message || '保存失败');
+        }
+      } else {
+        const res = await reportAPI.create(formData);
+        if (res.success) {
+          setReportList((prev) => [res.data, ...prev]);
+          toast.success('周报已创建');
+        } else {
+          toast.error(res.message || '创建失败');
+        }
       }
+      setIsCreateModalOpen(false);
+      setFormData({ title: '', content: '' });
     } catch {
-      const newReport: Report = {
-        id: Date.now(),
-        title: formData.title || '',
-        report_date: new Date().toISOString().split('T')[0],
-        content: formData.content || '',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      addReport(newReport);
-      setReportList((prev) => [newReport, ...prev]);
+      toast.error('保存失败，请检查后端服务');
+    } finally {
+      setLoading(false);
     }
-    setIsCreateModalOpen(false);
-    setFormData({ title: '', content: '' });
   };
 
   const handleDelete = async (id: number) => {
     if (!confirm('确定要删除这份周报吗？')) return;
     try {
-      await reportAPI.delete(id);
-      deleteReport(id);
-      setReportList((prev) => prev.filter((r) => r.id !== id));
+      const res = await reportAPI.delete(id);
+      if (res.success) {
+        setReportList((prev) => prev.filter((r) => r.id !== id));
+        toast.success('周报已删除');
+      } else {
+        toast.error(res.message || '删除失败');
+      }
     } catch {
-      deleteReport(id);
-      setReportList((prev) => prev.filter((r) => r.id !== id));
+      toast.error('删除失败，请检查后端服务');
     }
   };
 
@@ -141,19 +111,30 @@ export default function WeeklyReport() {
       });
 
       if (res.success) {
-        setFormData({
-          title: `${endDate.getFullYear()}年第${getWeekNumber(endDate)}周工作周报`,
+        setFormData((prev) => ({
+          ...prev,
+          title: prev.title || `${endDate.getFullYear()}年第${getWeekNumber(endDate)}周工作周报`,
           content: res.data.content,
-        });
+        }));
+        toast.success('AI 生成完成');
+      } else {
+        toast.error(res.message || 'AI 生成失败');
       }
     } catch {
-      setFormData({
-        title: `${new Date().getFullYear()}年第${getWeekNumber(new Date())}周工作周报`,
-        content: `## 本周工作总结\n\n### 项目进展\n1. **EAP系统升级v2.0** - 完成75%\n   - 完成API接口设计文档编写\n   - 数据库迁移脚本编写中\n\n2. **Litho机台驱动优化** - 完成45%\n   - 性能测试报告分析完成\n\n### 需求处理\n1. Lot Tracking功能增强 - 待处理\n2. EPI机台参数调整 - 处理中\n3. CMP设备驱动更新 - 处理中\n\n### 机台上线\n本周无新上机台\n\n### 下周计划\n1. 完成数据库迁移脚本\n2. 继续Litho驱动优化\n3. 处理Lot Tracking需求`,
-      });
+      toast.error('AI 生成失败，请先在「设置 → AI」中配置并测试连接');
     } finally {
       setAiLoading(false);
     }
+  };
+
+  const handleExport = (report: Report) => {
+    const blob = new Blob(['\ufeff' + report.content], { type: 'text/markdown;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${report.title || '周报'}.md`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    toast.success('已导出为 Markdown 文件');
   };
 
   const getWeekNumber = (date: Date): number => {
@@ -164,140 +145,136 @@ export default function WeeklyReport() {
   };
 
   return (
-    <div className="animate-fade-in">
-      <div className="p-6">
-        <Card className="mb-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-400" />
-                <input
-                  type="text"
-                  placeholder="搜索周报标题或内容..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 pr-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-sm text-white placeholder-dark-400 focus:outline-none focus:border-cyan-500 w-full sm:w-64"
-                />
-              </div>
-            </div>
-            <Button onClick={() => setIsCreateModalOpen(true)}>
-              <Plus className="w-4 h-4" />
-              新建周报
-            </Button>
-          </div>
-        </Card>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredReports.length === 0 ? (
-            <div className="col-span-full text-center py-12">
-              <FileText className="w-16 h-16 text-dark-600 mx-auto mb-4" />
-              <p className="text-dark-400">暂无周报记录</p>
-              <Button onClick={() => setIsCreateModalOpen(true)} className="mt-4">
-                创建第一份周报
-              </Button>
-            </div>
-          ) : (
-            filteredReports.map((report) => (
-              <Card key={report.id} title={report.title} hover className="group">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-sm text-dark-400">
-                    <Calendar className="w-4 h-4 text-primary-400" />
-                    <span>报告日期: {report.report_date}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-dark-400">
-                    <Clock className="w-4 h-4 text-dark-500" />
-                    <span>创建于: {new Date(report.created_at).toLocaleDateString()}</span>
-                  </div>
-                  <p className="text-sm text-dark-300 line-clamp-4">
-                    {report.content.substring(0, 200)}...
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between pt-4 mt-4 border-t border-dark-700">
-                  <div className="flex items-center gap-4">
-                    <span className="text-xs text-dark-500">
-                      {report.content.split('\n').filter((line) => line.startsWith('###')).length} 个章节
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <Button variant="ghost" size="sm" onClick={() => { setSelectedReport(report); setIsPreviewModalOpen(true); }}>
-                      <Eye className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => { setFormData(report); setIsCreateModalOpen(true); }}>
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                    <Button variant="danger" size="sm" onClick={() => handleDelete(report.id)}>
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => {}}>
-                      <Download className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ))
-          )}
+    <div className="animate-fade-in space-y-4">
+      {/* 工具栏 */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="搜索周报标题或内容..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-10 pr-4 text-sm text-gray-700 placeholder-gray-400 transition-colors focus:border-accent-500 focus:outline-none sm:w-64"
+          />
         </div>
+        <Button onClick={() => { setFormData({ title: '', content: '' }); setIsCreateModalOpen(true); }}>
+          <Plus className="h-4 w-4" />
+          新建周报
+        </Button>
       </div>
 
-      <Modal 
-        isOpen={isCreateModalOpen} 
+      {/* 周报列表 */}
+      {loading ? (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <Skeleton className="h-48" />
+          <Skeleton className="h-48" />
+        </div>
+      ) : filteredReports.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={FileText}
+            title={searchQuery ? '没有匹配的周报' : '暂无周报记录'}
+            description={searchQuery ? '换个关键词试试' : '创建第一份周报，或用 AI 一键生成'}
+            action={<Button onClick={() => setIsCreateModalOpen(true)}>创建周报</Button>}
+          />
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {filteredReports.map((report) => (
+            <Card key={report.id} title={report.title} hover className="group">
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <Calendar className="h-4 w-4 text-gray-400" />
+                  <span>报告日期: {report.report_date}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <Clock className="h-4 w-4 text-gray-400" />
+                  <span>创建于: {new Date(report.created_at).toLocaleDateString()}</span>
+                </div>
+                <p className="line-clamp-4 whitespace-pre-wrap text-sm leading-relaxed text-gray-600">
+                  {report.content.substring(0, 200)}
+                </p>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3">
+                <span className="text-xs text-gray-400">
+                  {report.content.split('\n').filter((line) => line.startsWith('###')).length} 个章节
+                </span>
+                <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <Button variant="ghost" size="sm" title="预览" onClick={() => { setSelectedReport(report); setIsPreviewModalOpen(true); }}>
+                    <Eye className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" title="编辑" onClick={() => { setFormData(report); setIsCreateModalOpen(true); }}>
+                    <Edit className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" title="导出 Markdown" onClick={() => handleExport(report)}>
+                    <Download className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="sm" title="删除" onClick={() => handleDelete(report.id)}>
+                    <Trash2 className="h-4 w-4 text-red-500" />
+                  </Button>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* 新建/编辑弹窗 */}
+      <Modal
+        isOpen={isCreateModalOpen}
         onClose={() => {
           setIsCreateModalOpen(false);
           setFormData({ title: '', content: '' });
-        }} 
+        }}
         title={formData.id ? '编辑周报' : '新建周报'}
         size="xl"
       >
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-end gap-4">
             <div className="flex-1">
-              <label className="block text-sm font-medium text-dark-300 mb-1">周报标题 *</label>
+              <label className="mb-1 block text-sm font-medium text-gray-700">周报标题 *</label>
               <input
                 type="text"
                 value={formData.title}
                 onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                className="w-full rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 text-sm text-gray-800 transition-colors focus:border-accent-500 focus:bg-white focus:outline-none"
                 placeholder="例如: 2026年第28周工作周报"
               />
             </div>
-            <div className="ml-4">
-              <label className="block text-sm font-medium text-dark-300 mb-1">报告日期</label>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">报告日期</label>
               <input
                 type="date"
                 value={formData.report_date}
                 onChange={(e) => setFormData({ ...formData, report_date: e.target.value })}
-                className="px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:border-cyan-500"
+                className="rounded-lg border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-800 transition-colors focus:border-accent-500 focus:bg-white focus:outline-none"
               />
             </div>
           </div>
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium text-dark-300">周报内容</label>
-              <Button 
-                variant="secondary" 
-                size="sm" 
-                onClick={handleGenerateAIReport}
-                loading={aiLoading}
-              >
-                <Sparkles className="w-4 h-4" />
-                AI生成
+            <div className="mb-1 flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-700">周报内容 *</label>
+              <Button variant="secondary" size="sm" onClick={handleGenerateAIReport} loading={aiLoading}>
+                <Sparkles className="h-4 w-4" />
+                AI 生成
               </Button>
             </div>
             <textarea
               value={formData.content}
               onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-              className="w-full px-4 py-2 bg-dark-700 border border-dark-600 rounded-lg text-white focus:outline-none focus:border-cyan-500 resize-none font-mono text-sm"
+              className="w-full resize-none rounded-lg border border-gray-300 bg-gray-50 px-4 py-2 font-mono text-sm text-gray-800 transition-colors focus:border-accent-500 focus:bg-white focus:outline-none"
               rows={12}
-              placeholder="请输入周报内容...\n\n建议格式：\n## 本周工作总结\n\n### 项目进展\n### 需求处理\n### 机台上线\n### 下周计划"
+              placeholder={'建议格式：\n## 本周工作总结\n\n### 项目进展\n### 需求处理\n### 机台上线\n### 下周计划'}
             />
           </div>
-          <div className="flex items-center justify-end gap-3 pt-4">
+          <div className="flex items-center justify-end gap-2 pt-1">
             <Button variant="ghost" onClick={() => setIsCreateModalOpen(false)}>
               取消
             </Button>
-            <Button 
-              onClick={handleCreate} 
+            <Button
+              onClick={handleCreate}
               disabled={!formData.title || !formData.content || loading}
               loading={loading}
             >
@@ -307,34 +284,35 @@ export default function WeeklyReport() {
         </div>
       </Modal>
 
-      <Modal 
-        isOpen={isPreviewModalOpen} 
-        onClose={() => { setIsPreviewModalOpen(false); setSelectedReport(null); }} 
+      {/* 预览弹窗 */}
+      <Modal
+        isOpen={isPreviewModalOpen}
+        onClose={() => { setIsPreviewModalOpen(false); setSelectedReport(null); }}
         title={selectedReport?.title || ''}
         size="xl"
       >
         {selectedReport && (
           <div className="space-y-4">
-            <div className="flex items-center gap-4 text-sm text-dark-400">
-              <span className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-primary-400" />
+            <div className="flex items-center gap-4 text-sm text-gray-500">
+              <span className="flex items-center gap-1.5">
+                <Calendar className="h-4 w-4 text-gray-400" />
                 {selectedReport.report_date}
               </span>
-              <span className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-dark-500" />
+              <span className="flex items-center gap-1.5">
+                <Clock className="h-4 w-4 text-gray-400" />
                 创建于: {new Date(selectedReport.created_at).toLocaleString()}
               </span>
             </div>
-            <div className="bg-dark-700/50 rounded-lg p-4 whitespace-pre-wrap text-sm text-dark-200 max-h-[60vh] overflow-y-auto">
+            <div className="max-h-[55vh] overflow-y-auto whitespace-pre-wrap rounded-lg bg-gray-50 p-4 text-sm leading-relaxed text-gray-700">
               {selectedReport.content}
             </div>
-            <div className="flex items-center justify-end gap-3 pt-4 border-t border-dark-700">
+            <div className="flex items-center justify-end gap-2 border-t border-gray-100 pt-3">
               <Button variant="ghost" onClick={() => { setIsPreviewModalOpen(false); setSelectedReport(null); }}>
                 关闭
               </Button>
-              <Button variant="secondary">
-                <Download className="w-4 h-4" />
-                导出
+              <Button variant="secondary" onClick={() => handleExport(selectedReport)}>
+                <Download className="h-4 w-4" />
+                导出 Markdown
               </Button>
             </div>
           </div>

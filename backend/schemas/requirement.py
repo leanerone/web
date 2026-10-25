@@ -39,3 +39,21 @@ class RequirementResponse(RequirementBase):
 
     class Config:
         from_attributes = True
+
+
+class ChangeRecordCreate(BaseModel):
+    change_type: str
+    description: str
+    file_path: Optional[str] = None
+
+
+class ChangeRecordResponse(BaseModel):
+    id: int
+    requirement_id: int
+    change_type: str
+    description: str
+    file_path: Optional[str] = None
+    applied_at: datetime
+
+    class Config:
+        from_attributes = True

@@ -37,10 +37,10 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-cyan-900 to-blue-900 relative overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-accent-900 to-blue-900 relative overflow-hidden">
       {/* 背景装饰 */}
       <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-20 -left-20 w-96 h-96 bg-cyan-500/20 rounded-full blur-3xl" />
+        <div className="absolute -top-20 -left-20 w-96 h-96 bg-accent-500/20 rounded-full blur-3xl" />
         <div className="absolute -bottom-20 -right-20 w-96 h-96 bg-blue-500/20 rounded-full blur-3xl" />
         <div className="absolute top-1/3 right-1/4 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl" />
       </div>
@@ -48,18 +48,18 @@ export default function Login() {
       <div className="relative z-10 w-full max-w-md mx-4">
         {/* Logo和标题 */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-20 h-20 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-2xl shadow-2xl shadow-cyan-500/30 mb-4">
+          <div className="inline-flex items-center justify-center w-20 h-20 brand-gradient rounded-2xl shadow-2xl shadow-accent-500/30 mb-4">
             <Monitor className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-white mb-2">CIM Work Manager</h1>
-          <p className="text-cyan-200/80 text-sm">半导体CIM EAP工程师工作管理平台</p>
+          <p className="text-accent-200/80 text-sm">半导体CIM EAP工程师工作管理平台</p>
         </div>
 
         {/* 登录卡片 */}
         <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl p-8">
           {/* Windows SSO 区域 */}
           <div className="mb-6">
-            <div className="flex items-center gap-2 mb-4 text-cyan-300">
+            <div className="flex items-center gap-2 mb-4 text-accent-300">
               <ShieldCheck className="w-5 h-5" />
               <span className="text-sm font-medium">Windows域认证SSO</span>
             </div>
@@ -67,7 +67,7 @@ export default function Login() {
             <button
               onClick={handleWindowsLogin}
               disabled={isLoading}
-              className="w-full py-3 px-4 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-medium rounded-xl shadow-lg shadow-cyan-500/30 transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full py-3 px-4 brand-gradient-r text-white font-medium rounded-xl shadow-lg shadow-accent-500/30 transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <>
@@ -82,7 +82,7 @@ export default function Login() {
               )}
             </button>
 
-            <p className="mt-3 text-xs text-cyan-200/60 text-center">
+            <p className="mt-3 text-xs text-accent-200/60 text-center">
               点击按钮将自动继承当前Windows登录会话，无需输入密码
             </p>
           </div>
@@ -101,7 +101,7 @@ export default function Login() {
               <div className="w-full border-t border-white/20" />
             </div>
             <div className="relative flex justify-center">
-              <span className="bg-white/10 backdrop-blur-xl px-3 text-xs text-cyan-200/70">
+              <span className="bg-white/10 backdrop-blur-xl px-3 text-xs text-accent-200/70">
                 或使用用户名登录
               </span>
             </div>
@@ -111,7 +111,7 @@ export default function Login() {
           {!showManual ? (
             <button
               onClick={() => setShowManual(true)}
-              className="w-full py-2.5 px-4 bg-white/5 hover:bg-white/10 border border-white/20 text-cyan-100 text-sm rounded-xl transition-all duration-200 flex items-center justify-center gap-2"
+              className="w-full py-2.5 px-4 bg-white/5 hover:bg-white/10 border border-white/20 text-accent-100 text-sm rounded-xl transition-all duration-200 flex items-center justify-center gap-2"
             >
               <User className="w-4 h-4" />
               手动输入用户名
@@ -120,13 +120,13 @@ export default function Login() {
           ) : (
             <form onSubmit={handleManualLogin} className="space-y-3">
               <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-300" />
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-accent-300" />
                 <input
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="输入Windows用户名"
-                  className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/20 rounded-xl text-white placeholder-cyan-200/40 text-sm focus:outline-none focus:border-cyan-400 focus:bg-white/10 transition-all"
+                  className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/20 rounded-xl text-white placeholder-accent-200/40 text-sm focus:outline-none focus:border-accent-400 focus:bg-white/10 transition-all"
                   autoFocus
                 />
               </div>
@@ -149,28 +149,10 @@ export default function Login() {
               </button>
             </form>
           )}
-
-          {/* 快捷用户列表 */}
-          {showManual && (
-            <div className="mt-4 pt-4 border-t border-white/10">
-              <p className="text-xs text-cyan-200/60 mb-2">快捷用户：</p>
-              <div className="flex flex-wrap gap-2">
-                {['administrator', 'eap.engineer', 'cim.user'].map((u) => (
-                  <button
-                    key={u}
-                    onClick={() => setUsername(u)}
-                    className="px-3 py-1 text-xs bg-white/5 hover:bg-white/15 border border-white/10 text-cyan-100 rounded-full transition-colors"
-                  >
-                    {u}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* 底部信息 */}
-        <div className="mt-6 text-center text-xs text-cyan-200/50">
+        <div className="mt-6 text-center text-xs text-accent-200/50">
           <p>企业内网环境 · Windows域认证 · 自动单点登录</p>
           <p className="mt-1">© 2026 CIM Work Manager</p>
         </div>
