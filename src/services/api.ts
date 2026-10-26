@@ -23,6 +23,7 @@ import type {
   NotesSettings,
   SystemSetting,
 } from '@/types';
+import { useAuthStore } from '@/stores/authStore';
 
 const STORAGE_KEY = 'cim_auth';
 
@@ -54,11 +55,11 @@ api.interceptors.response.use(
   (response) => response.data,
   (error) => {
     console.error('API Error:', error);
-    // 401未授权时跳转登录页
+    // 401未授权：清空登录态并回登录页（通过 authStore，避免绕过状态管理）
     if (error.response?.status === 401) {
-      localStorage.removeItem(STORAGE_KEY);
+      useAuthStore.getState().logout();
       if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
+        window.location.replace('/login');
       }
     }
     return Promise.reject(error);
@@ -227,7 +228,7 @@ export const userAPI = {
   get: (id: number): Promise<APIResponse<User>> =>
     api.get(`/users/${id}`),
   
-  create: (data: Partial<User>): Promise<APIResponse<User>> =>
+  create: (data: Partial<User> & { password?: string }): Promise<APIResponse<User>> =>
     api.post('/users', data),
   
   update: (id: number, data: Partial<User>): Promise<APIResponse<User>> =>
@@ -245,7 +246,8 @@ export const settingsAPI = {
     api.get(`/settings/${key}`),
   
   update: (key: string, value: string, description?: string, category?: string): Promise<APIResponse<SystemSetting>> =>
-    api.put(`/settings/${key}`, null, { params: { value, description, category } }),
+    // 值走 request body，避免敏感配置进入 URL 和访问日志
+    api.put(`/settings/${key}`, { value, description, category }),
   
   getAISettings: (): Promise<APIResponse<AISettings>> =>
     api.get('/settings/ai/config'),

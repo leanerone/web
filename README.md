@@ -36,7 +36,7 @@
 | 前端 | React 18 + Vite + TypeScript + Tailwind CSS + zustand + react-router |
 | 后端 | FastAPI + SQLAlchemy 2.0 + Pydantic v2 |
 | 数据库 | 本地 SQLite（零配置开发）/ Oracle 量产（PANJOB 只读直连） |
-| AI | OpenAI 兼容 API（未配置时自动降级本地算法） |
+| AI | OpenAI 兼容 API（未配置时自动降级本地算法；设置页配置优先于 .env） |
 
 ## 目录结构
 
@@ -70,7 +70,9 @@ pip install -r requirements.txt
 python run.py        # http://localhost:8000，SQLite 自动建表+种子数据
 ```
 
-登录：进入页面自动尝试 Windows 域 SSO；也可手动输入用户名（内置 `administrator` / `eap.engineer` / `cim.user`）。
+登录：进入页面自动尝试 Windows 域 SSO（后端进程账号，内网演示用途；生产应接 Kerberos/SPNEGO 或反向代理 REMOTE_USER）；也可手动输入用户名+密码。内置账号 `administrator` / `eap.engineer` / `cim.user`，初始密码见 `.env` 的 `DEFAULT_USER_PASSWORD`（默认 `cim123456`，可在「设置 → 成员」中新建用户并设置密码）。
+
+> 安全提示：所有业务 API 均需 Bearer token，JWT 密钥通过 `.env` 的 `JWT_SECRET` 配置；未配置时使用临时密钥（重启即失效并强制重新登录）。生产部署务必显式设置 `JWT_SECRET` 与 `CORS_ORIGINS`。
 
 ### 量产 Oracle 模式
 见 [DEPLOY_ORACLE_SOP.md](./DEPLOY_ORACLE_SOP.md)（PANJOB 账号 GRANT 授权 + init_oracle.sql 初始化）。

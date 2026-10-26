@@ -34,6 +34,14 @@ export default function SystemSettings() {
     const t = searchParams.get('tab');
     return t === 'ai' || t === 'notes' || t === 'members' || t === 'account' ? t : 'general';
   });
+
+  // SPA 内导航改变 ?tab= 时组件不会重挂载，必须显式跟随 URL
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (t === 'ai' || t === 'notes' || t === 'members' || t === 'account') {
+      setActiveTab((prev) => (prev === t ? prev : t));
+    }
+  }, [searchParams]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);

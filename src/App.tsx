@@ -1,24 +1,34 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import CommandPalette from '@/components/CommandPalette';
 import Dashboard from '@/pages/Dashboard';
-import Projects from '@/pages/Projects';
-import ProjectDetail from '@/pages/ProjectDetail';
-import Equipment from '@/pages/Equipment';
-import EquipmentDetail from '@/pages/EquipmentDetail';
-import Requirements from '@/pages/Requirements';
-import RequirementDetail from '@/pages/RequirementDetail';
-import AIAssistant from '@/pages/AIAssistant';
-import WeeklyReport from '@/pages/WeeklyReport';
-import Settings from '@/pages/Settings';
 import Login from '@/pages/Login';
-import WorkItems from '@/pages/WorkItems';
 import { Toaster } from '@/components/ui/Toast';
 import { ConfirmDialogHost } from '@/components/ui/ConfirmDialog';
 import { useAuthStore } from '@/stores/authStore';
 import useAppStore, { applyTheme } from '@/stores/appStore';
+
+// 非首屏页面全部懒加载，避免 14 个页面全部打进首屏 bundle
+const Projects = lazy(() => import('@/pages/Projects'));
+const ProjectDetail = lazy(() => import('@/pages/ProjectDetail'));
+const Equipment = lazy(() => import('@/pages/Equipment'));
+const EquipmentDetail = lazy(() => import('@/pages/EquipmentDetail'));
+const Requirements = lazy(() => import('@/pages/Requirements'));
+const RequirementDetail = lazy(() => import('@/pages/RequirementDetail'));
+const AIAssistant = lazy(() => import('@/pages/AIAssistant'));
+const WeeklyReport = lazy(() => import('@/pages/WeeklyReport'));
+const Settings = lazy(() => import('@/pages/Settings'));
+const WorkItems = lazy(() => import('@/pages/WorkItems'));
+
+function PageFallback() {
+  return (
+    <div className="flex h-full min-h-[200px] items-center justify-center">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-accent-500" />
+    </div>
+  );
+}
 
 const pageTitles: Record<string, { title: string; subtitle?: string }> = {
   '/': { title: '仪表盘', subtitle: '工作概览与统计' },
@@ -57,22 +67,24 @@ function PageContent() {
     >
       <Header title={pageInfo.title} subtitle={pageInfo.subtitle} />
       <main className="flex-1 overflow-auto bg-gray-50 p-6">
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/work-items" element={<WorkItems />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/projects/:id" element={<ProjectDetail />} />
-          <Route path="/equipment" element={<Equipment />} />
-          <Route path="/equipment/:equipmentName" element={<EquipmentDetail />} />
-          <Route path="/requirements" element={<Requirements />} />
-          <Route path="/requirements/:id" element={<RequirementDetail />} />
-          <Route path="/ai-assistant" element={<AIAssistant />} />
-          <Route path="/weekly-report" element={<WeeklyReport />} />
-          <Route path="/profile" element={<Navigate to="/settings?tab=account" replace />} />
-          <Route path="/users" element={<Navigate to="/settings?tab=members" replace />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/work-items" element={<WorkItems />} />
+            <Route path="/projects" element={<Projects />} />
+            <Route path="/projects/:id" element={<ProjectDetail />} />
+            <Route path="/equipment" element={<Equipment />} />
+            <Route path="/equipment/:equipmentName" element={<EquipmentDetail />} />
+            <Route path="/requirements" element={<Requirements />} />
+            <Route path="/requirements/:id" element={<RequirementDetail />} />
+            <Route path="/ai-assistant" element={<AIAssistant />} />
+            <Route path="/weekly-report" element={<WeeklyReport />} />
+            <Route path="/profile" element={<Navigate to="/settings?tab=account" replace />} />
+            <Route path="/users" element={<Navigate to="/settings?tab=members" replace />} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );

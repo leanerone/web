@@ -2,17 +2,27 @@
 
 提供Windows认证SSO接口和token验证接口。
 """
-from fastapi import APIRouter, Request, HTTPException, Header
-from pydantic import BaseModel
+import os
+import socket
+import time
 from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Header
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from database.session import get_db
+from database.models import User
 from services.auth_service import (
     get_current_windows_user,
     generate_token,
     verify_token,
+    verify_password,
+    token_expires_at,
+    JWT_EXPIRE_HOURS,
     KNOWN_USERS,
 )
-import time
-
+from services.user_service import get_user_by_username
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -30,67 +40,95 @@ class ManualLoginRequest(BaseModel):
 
 
 @router.get("/windows")
-def windows_login():
+def windows_login(db: Session = Depends(get_db)):
     """Windows SSO登录
 
     自动获取当前Windows登录用户信息并返回token。
-    前端调用此接口即可完成免密登录。
+
+    注意：读到的是后端进程的账号（内网演示用途）。真正的域认证应接入
+    Kerberos/SPNEGO，或由 IIS/nginx 等反向代理验证后传入 REMOTE_USER 头。
+    用户以 users 表为准：已停用账号拒绝登录；首次登录自动建档。
     """
-    user = get_current_windows_user()
+    identity = get_current_windows_user()
+    username = identity["username"]
+
+    db_user = get_user_by_username(db, username)
+    if not db_user:
+        # 首次 SSO：以 KNOWN_USERS 中的展示信息自动建档（无密码，仅可 SSO 登录）
+        known = KNOWN_USERS.get(username.lower())
+        if known:
+            display_name, role, dept, team = known["name"], known["role"], known["department"], known["team"]
+        else:
+            display_name, role, dept, team = username, "engineer", "未分配", "EAP"
+        db_user = User(
+            username=username,
+            display_name=display_name,
+            role=role,
+            department=dept,
+            team=team,
+            status="active",
+        )
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+    elif db_user.status != "active":
+        raise HTTPException(status_code=403, detail="账号已停用，请联系管理员")
+
+    user = {
+        "username": db_user.username,
+        "display_name": db_user.display_name or db_user.username,
+        "role": db_user.role or "user",
+        "department": db_user.department or identity.get("department", "未分配"),
+        "team": db_user.team or identity.get("team", "EAP"),
+        "domain": identity.get("domain", "WORKGROUP"),
+        "computer": identity.get("computer", ""),
+        "login_at": identity.get("login_at", time.strftime("%Y-%m-%d %H:%M:%S")),
+    }
     token = generate_token(user)
-    expires_at = time.strftime(
-        "%Y-%m-%d %H:%M:%S",
-        time.localtime(time.time() + 8 * 3600),
-    )
     return LoginResponse(
         success=True,
         user=user,
         token=token,
-        expires_at=expires_at,
+        expires_at=token_expires_at({"exp": time.time() + JWT_EXPIRE_HOURS * 3600}),
     )
 
 
 @router.post("/login")
-def manual_login(req: ManualLoginRequest):
+def manual_login(req: ManualLoginRequest, db: Session = Depends(get_db)):
     """手动登录（备用方案）
 
-    在Windows SSO不可用时（如非Windows环境或跨域访问），
-    可使用用户名登录。密码可选，企业内网默认信任。
+    校验 users 表中的密码哈希；角色/部门以数据库为准，
+    未知用户或密码错误一律 401，不再按用户名推导角色。
     """
     username = req.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="用户名不能为空")
+    if not req.password:
+        raise HTTPException(status_code=400, detail="请输入密码")
 
-    user_info = KNOWN_USERS.get(username.lower(), {
-        "name": username,
-        "role": "engineer",
-        "department": "未分配",
-        "team": "EAP",
-    })
+    db_user = get_user_by_username(db, username)
+    if not db_user:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if not verify_password(req.password, db_user.password_hash):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
 
-    import os
-    import socket
     user = {
-        "username": username,
-        "display_name": user_info["name"],
-        "role": user_info["role"],
-        "department": user_info["department"],
-        "team": user_info["team"],
+        "username": db_user.username,
+        "display_name": db_user.display_name or db_user.username,
+        "role": db_user.role or "user",
+        "department": db_user.department or "未分配",
+        "team": db_user.team or "EAP",
         "domain": os.environ.get("USERDOMAIN") or "WORKGROUP",
         "computer": os.environ.get("COMPUTERNAME") or socket.gethostname(),
         "login_at": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
 
     token = generate_token(user)
-    expires_at = time.strftime(
-        "%Y-%m-%d %H:%M:%S",
-        time.localtime(time.time() + 8 * 3600),
-    )
     return LoginResponse(
         success=True,
         user=user,
         token=token,
-        expires_at=expires_at,
+        expires_at=token_expires_at({"exp": time.time() + JWT_EXPIRE_HOURS * 3600}),
     )
 
 
@@ -109,10 +147,19 @@ def verify_auth(authorization: Optional[str] = Header(None)):
 
 
 @router.get("/users")
-def list_known_users():
-    """列出已知用户（用于手动登录的下拉选择）"""
-    users = [
-        {"username": k, "display_name": v["name"], "role": v["role"], "department": v["department"], "team": v["team"]}
-        for k, v in KNOWN_USERS.items()
-    ]
-    return {"success": True, "data": users}
+def list_known_users(db: Session = Depends(get_db)):
+    """列出可登录用户（用于手动登录的下拉选择，不含密码信息）"""
+    users = db.query(User).filter(User.status == "active").all()
+    return {
+        "success": True,
+        "data": [
+            {
+                "username": u.username,
+                "display_name": u.display_name,
+                "role": u.role,
+                "department": u.department,
+                "team": u.team,
+            }
+            for u in users
+        ],
+    }

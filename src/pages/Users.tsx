@@ -26,6 +26,7 @@ export default function UserManagement() {
     username: '',
     display_name: '',
     email: '',
+    password: '',
     role: 'user',
     department: '',
     team: '',
@@ -69,6 +70,7 @@ export default function UserManagement() {
       username: '',
       display_name: '',
       email: '',
+      password: '',
       role: 'user',
       department: '',
       team: '',
@@ -84,6 +86,7 @@ export default function UserManagement() {
       username: user.username,
       display_name: user.display_name,
       email: user.email,
+      password: '',
       role: user.role,
       department: user.department,
       team: user.team,
@@ -94,9 +97,14 @@ export default function UserManagement() {
 
   const handleSave = async () => {
     if (!formData.username) return;
+    if (modalMode === 'create' && !formData.password) {
+      toast.error('请为新用户设置初始密码');
+      return;
+    }
     try {
       if (modalMode === 'edit' && editingUser) {
-        const res = await userAPI.update(editingUser.id, formData);
+        const { password: _password, ...updateData } = formData;
+        const res = await userAPI.update(editingUser.id, updateData);
         if (res.success) {
           setUsers((prev) => prev.map((u) => (u.id === editingUser.id ? res.data : u)));
           toast.success('用户已保存');
@@ -264,6 +272,18 @@ export default function UserManagement() {
               />
             </div>
           </div>
+          {modalMode === 'create' && (
+            <div>
+              <label className={labelCls}>初始密码 *</label>
+              <input
+                type="text"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                className={`${inputCls} w-full`}
+                placeholder="设置初始登录密码（用户可由管理员后续重设）"
+              />
+            </div>
+          )}
           <div>
             <label className={labelCls}>邮箱</label>
             <input

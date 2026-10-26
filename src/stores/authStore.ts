@@ -20,7 +20,7 @@ interface AuthState {
   error: string | null;
 
   loginWithWindows: () => Promise<boolean>;
-  loginWithUsername: (username: string) => Promise<boolean>;
+  loginWithUsername: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
   initialize: () => void;
   clearError: () => void;
@@ -91,13 +91,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
   },
 
-  loginWithUsername: async (username: string) => {
+  loginWithUsername: async (username: string, password: string) => {
     set({ isLoading: true, error: null });
     try {
       const resp = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username }),
+        body: JSON.stringify({ username, password }),
       });
       const data = await resp.json();
       if (data.success) {

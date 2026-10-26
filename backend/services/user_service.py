@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
 from database.models import User
 from schemas.user import UserCreate, UserUpdate
+from services.auth_service import hash_password
+from config.settings import settings
 from typing import List, Optional
 
 
@@ -17,7 +19,11 @@ def get_user_by_username(db: Session, username: str) -> Optional[User]:
 
 
 def create_user(db: Session, user: UserCreate) -> User:
-    db_user = User(**user.model_dump())
+    data = user.model_dump()
+    password = data.pop("password", None)
+    db_user = User(**data)
+    if password:
+        db_user.password_hash = hash_password(password)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
@@ -44,14 +50,28 @@ def delete_user(db: Session, user_id: int) -> bool:
     return True
 
 
+def set_user_password(db: Session, user_id: int, password: str) -> Optional[User]:
+    db_user = get_user(db, user_id)
+    if not db_user:
+        return None
+    db_user.password_hash = hash_password(password)
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+
 def init_default_users(db: Session):
     default_users = [
         {"username": "administrator", "display_name": "管理员", "role": "admin", "department": "IT", "team": "CIM", "email": "admin@company.com"},
         {"username": "eap.engineer", "display_name": "EAP工程师", "role": "engineer", "department": "制造", "team": "EAP", "email": "eap@company.com"},
         {"username": "cim.user", "display_name": "CIM用户", "role": "user", "department": "制造", "team": "CIM", "email": "cim@company.com"},
     ]
-    
+
     for user_data in default_users:
         existing = get_user_by_username(db, user_data["username"])
         if not existing:
-            create_user(db, UserCreate(**user_data))
+            create_user(db, UserCreate(**user_data, password=settings.default_user_password))
+        elif not existing.password_hash:
+            # 老库升级：给没有密码的种子用户补上默认密码
+            existing.password_hash = hash_password(settings.default_user_password)
+            db.commit()

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User, Monitor, Loader2, ShieldCheck, AlertCircle, ChevronDown } from 'lucide-react';
+import { Lock, User, Monitor, Loader2, ShieldCheck, AlertCircle, ChevronDown, KeyRound } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 
 export default function Login() {
@@ -8,6 +8,7 @@ export default function Login() {
   const { loginWithWindows, loginWithUsername, isLoading, error, clearError } = useAuthStore();
   const [showManual, setShowManual] = useState(false);
   const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
 
   // 进入页面自动尝试Windows SSO
   useEffect(() => {
@@ -30,9 +31,9 @@ export default function Login() {
 
   const handleManualLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim()) return;
+    if (!username.trim() || !password) return;
     clearError();
-    const ok = await loginWithUsername(username.trim());
+    const ok = await loginWithUsername(username.trim(), password);
     if (ok) navigate('/dashboard');
   };
 
@@ -130,9 +131,19 @@ export default function Login() {
                   autoFocus
                 />
               </div>
+              <div className="relative">
+                <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-accent-300" />
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="输入密码"
+                  className="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/20 rounded-xl text-white placeholder-accent-200/40 text-sm focus:outline-none focus:border-accent-400 focus:bg-white/10 transition-all"
+                />
+              </div>
               <button
                 type="submit"
-                disabled={isLoading || !username.trim()}
+                disabled={isLoading || !username.trim() || !password}
                 className="w-full py-2.5 px-4 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-sm rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {isLoading ? (

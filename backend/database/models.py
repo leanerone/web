@@ -60,26 +60,28 @@ class Project(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    tasks = relationship("Task", back_populates="project")
-    requirements = relationship("Requirement", back_populates="project")
-    notes_documents = relationship("NotesDocument", back_populates="project")
-    work_items = relationship("WorkItem", back_populates="project")
+    # 子行交由 FK 的 ondelete 规则处理（tasks CASCADE；其余 SET NULL / CASCADE）
+    tasks = relationship("Task", back_populates="project", passive_deletes=True)
+    requirements = relationship("Requirement", back_populates="project", passive_deletes=True)
+    notes_documents = relationship("NotesDocument", back_populates="project", passive_deletes=True)
+    work_items = relationship("WorkItem", back_populates="project", passive_deletes=True)
 
 
 class Task(Base):
     __tablename__ = "tasks"
 
     id = Column(Integer, primary_key=True, index=True)
-    project_id = Column(Integer, ForeignKey("projects.id"))
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text)
-    status = Column(SQLAlchemyEnum(TaskStatus), default=TaskStatus.pending)
-    priority = Column(SQLAlchemyEnum(TaskPriority), default=TaskPriority.medium)
-    due_date = Column(Date)
+    status = Column(SQLAlchemyEnum(TaskStatus), default=TaskStatus.pending, index=True)
+    priority = Column(SQLAlchemyEnum(TaskPriority), default=TaskPriority.medium, index=True)
+    due_date = Column(Date, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    project = relationship("Project", back_populates="tasks")
+    # 项目删除时任务随之删除（DB 级 CASCADE，ORM 不再逐行处理）
+    project = relationship("Project", back_populates="tasks", passive_deletes=True)
 
 
 class EquipmentType(Base):
@@ -127,7 +129,7 @@ class Configuration(Base):
     __tablename__ = "configurations"
 
     id = Column(Integer, primary_key=True, index=True)
-    equipment_name = Column(String(32), ForeignKey("EQUIPMENTINFO.EQUIPMENT"))
+    equipment_name = Column(String(32), ForeignKey("EQUIPMENTINFO.EQUIPMENT"), index=True)
     config_key = Column(String(100), nullable=False)
     config_value = Column(Text)
     version = Column(String(20))
@@ -142,26 +144,26 @@ class Requirement(Base):
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text)
-    priority = Column(SQLAlchemyEnum(RequirementPriority), default=RequirementPriority.medium)
-    status = Column(SQLAlchemyEnum(RequirementStatus), default=RequirementStatus.dev)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
     # 多机台关联: 存 JSON 数组字符串, 如 ["CATEOX-57","GATEOX-57"]
     # (去掉单值 FK 约束, 支持按 EquipmentType/Model 多选)
     equipment_name = Column(String(1000), nullable=True)
     notes_url = Column(String(1000), nullable=True)
     notes_doc_id = Column(Integer, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    status = Column(SQLAlchemyEnum(RequirementStatus), default=RequirementStatus.dev, index=True)
+    priority = Column(SQLAlchemyEnum(RequirementPriority), default=RequirementPriority.medium, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     project = relationship("Project", back_populates="requirements")
-    change_records = relationship("ChangeRecord", back_populates="requirement")
+    change_records = relationship("ChangeRecord", back_populates="requirement", passive_deletes=True)
 
 
 class ChangeRecord(Base):
     __tablename__ = "change_records"
 
     id = Column(Integer, primary_key=True, index=True)
-    requirement_id = Column(Integer, ForeignKey("requirements.id"))
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), index=True)
     change_type = Column(String(50), nullable=False)
     description = Column(Text)
     file_path = Column(String(500))
@@ -185,11 +187,11 @@ class NotesDocument(Base):
     __tablename__ = "notes_documents"
 
     id = Column(Integer, primary_key=True, index=True)
-    notes_id = Column(String(100))
+    notes_id = Column(String(100), index=True)
     title = Column(String(200))
     content = Column(Text)
     url = Column(String(500))
-    project_id = Column(Integer, ForeignKey("projects.id"))
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="CASCADE"), index=True)
     sync_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -201,6 +203,8 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(100), unique=True, nullable=False, index=True)
+    # PBKDF2-SHA256 哈希（pbkdf2_sha256$<salt>$<digest>）；SSO 用户可为空
+    password_hash = Column(String(255))
     display_name = Column(String(200))
     email = Column(String(200))
     role = Column(String(50), default="user")
@@ -241,15 +245,15 @@ class WorkItem(Base):
     __tablename__ = "work_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    category_id = Column(Integer, ForeignKey("work_categories.id"), nullable=True)
+    category_id = Column(Integer, ForeignKey("work_categories.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String(500), nullable=False)
     details = Column(Text)
-    urgency = Column(String(20), default="na")
-    importance = Column(String(20), default="na")
-    status = Column(String(30), default="pending")
-    priority_score = Column(Float, default=0.0)
-    due_date = Column(Date)
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    urgency = Column(String(20), default="na", index=True)
+    importance = Column(String(20), default="na", index=True)
+    status = Column(String(30), default="pending", index=True)
+    priority_score = Column(Float, default=0.0, index=True)
+    due_date = Column(Date, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
     source_type = Column(String(50), default="manual")
     source_url = Column(String(1000))
     ai_notes = Column(Text)
@@ -258,7 +262,8 @@ class WorkItem(Base):
 
     category = relationship("WorkCategory", back_populates="work_items")
     project = relationship("Project", back_populates="work_items")
-    logs = relationship("WorkLog", back_populates="work_item")
+    # 工作项删除时审计日志随之删除（避免孤儿行）
+    logs = relationship("WorkLog", back_populates="work_item", passive_deletes=True)
 
 
 class DailyPlan(Base):
@@ -278,7 +283,7 @@ class WorkLog(Base):
     __tablename__ = "work_logs"
 
     id = Column(Integer, primary_key=True, index=True)
-    work_item_id = Column(Integer, ForeignKey("work_items.id"))
+    work_item_id = Column(Integer, ForeignKey("work_items.id", ondelete="CASCADE"), index=True)
     action = Column(String(50), nullable=False)
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

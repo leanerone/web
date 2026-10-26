@@ -21,7 +21,9 @@ def get_dashboard_stats(db: Session):
         )
     ).count()
     
-    pending_requirements = db.query(Requirement).filter(Requirement.status == RequirementStatus.pending).count()
+    # RequirementStatus 没有 pending 成员（dev/testing/deploying/completed），
+    # 「待处理」= 未完成的全部状态，否则 AttributeError 必然 500
+    pending_requirements = db.query(Requirement).filter(Requirement.status != RequirementStatus.completed).count()
     
     completed_tasks = db.query(Task).filter(Task.status == TaskStatus.completed).count()
     

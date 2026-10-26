@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import useAppStore from '@/stores/appStore';
 import { useClickOutside } from '@/hooks/useClickOutside';
-import { aiAPI, workItemsAPI } from '@/services/api';
+import { workItemsAPI } from '@/services/api';
+import { todayLocal } from '@/lib/utils';
 import { role } from '@/constants/status';
 import type { WorkItem } from '@/types';
 
@@ -37,16 +38,27 @@ export default function Header({ title, subtitle }: HeaderProps) {
 
   const getInitials = (name: string) => (name ? name.charAt(0).toUpperCase() : 'U');
 
-  /** 打开通知时拉取真实提醒（逾期 + 高优先级，来自后端 check-reminders） */
+  /** 打开通知时拉取工作项，逾期/高优先级判断纯前端可算，无需再 POST 整包给后端 */
   const loadNotifications = useCallback(async () => {
     setNotifLoading(true);
     try {
-      const itemsRes = await workItemsAPI.list({ sort_by: 'priority_score', limit: 200 });
-      const items: WorkItem[] = itemsRes.success ? itemsRes.data : [];
-      const res = await aiAPI.checkReminders({ work_items: items });
-      if (res.success) {
-        setReminders(res.data.reminders);
+      const res = await workItemsAPI.list({ sort_by: 'priority_score', limit: 200 });
+      const items: WorkItem[] = res.success ? res.data : [];
+      const today = todayLocal();
+      const next: ReminderItem[] = [];
+      for (const it of items) {
+        if (it.status === 'completed') continue;
+        const overdue = !!it.due_date && it.due_date < today;
+        const high = it.urgency === 'high' || it.importance === 'high';
+        if (!overdue && !high) continue;
+        next.push({
+          type: overdue ? 'overdue' : 'high_priority',
+          item_id: it.id,
+          title: it.title,
+          message: overdue ? `任务已逾期，截止 ${it.due_date}` : '高优先级任务待处理',
+        });
       }
+      setReminders(next);
     } catch {
       setReminders([]);
     } finally {

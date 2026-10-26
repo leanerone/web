@@ -9,7 +9,7 @@ from schemas.task import TaskCreate, TaskUpdate, TaskResponse
 router = APIRouter(prefix="/projects", tags=["projects"])
 
 
-@router.get("/")
+@router.get("")
 def list_projects(
     keyword: str = Query(None),
     status: str = Query(None),
@@ -33,7 +33,7 @@ def get_project_detail(project_id: int, db: Session = Depends(get_db)):
     return {"success": True, "data": ProjectResponse.model_validate(project)}
 
 
-@router.post("/")
+@router.post("")
 def create_project_api(project: ProjectCreate, db: Session = Depends(get_db)):
     project = create_project(db, project)
     return {"success": True, "data": ProjectResponse.model_validate(project)}

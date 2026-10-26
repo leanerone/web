@@ -14,7 +14,8 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    pass
+    # 明文密码，服务层负责哈希；不回传
+    password: Optional[str] = None
 
 
 class UserUpdate(BaseModel):

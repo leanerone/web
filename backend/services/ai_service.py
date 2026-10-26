@@ -1,70 +1,69 @@
 import json
-from typing import List, Dict
+import logging
+from functools import lru_cache
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime, date
+
 from config.settings import settings
 
+logger = logging.getLogger("cim.ai")
 
-def generate_work_plan(input_text: str, tasks: List[Dict] = None, projects: List[Dict] = None) -> Dict:
-    if settings.openai_api_key:
-        return _call_openai_plan(input_text, tasks, projects)
-    else:
+AI_REQUEST_TIMEOUT = 60  # 秒；防止 AI 网关 hang 住占死线程池
+
+
+def _resolve_config(ai_config=None) -> Tuple[str, str, str]:
+    """生效配置：设置页保存的 DB 配置优先，.env 环境变量兜底。返回 (key, base_url, model)"""
+    key = (getattr(ai_config, "openai_api_key", "") or "") or settings.openai_api_key
+    base = (getattr(ai_config, "openai_api_base", "") or "") or settings.openai_api_base
+    model = (getattr(ai_config, "ai_model", "") or "") or settings.ai_model or "gpt-4o-mini"
+    return key, base, model
+
+
+@lru_cache(maxsize=8)
+def _get_client(api_key: str, base_url: str):
+    from openai import OpenAI
+    return OpenAI(api_key=api_key, base_url=base_url or None, timeout=AI_REQUEST_TIMEOUT, max_retries=1)
+
+
+def _chat(api_key: str, base_url: str, model: str, messages: list, temperature: float) -> Optional[str]:
+    """统一的补全调用：任何失败都记日志并返回 None，由调用方决定降级方式"""
+    try:
+        client = _get_client(api_key, base_url)
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        # 覆盖网络/鉴权/限流等 OpenAIError；绝不静默吞掉，必须留排查线索
+        logger.exception("AI 调用失败，将降级为本地算法: %s", e)
+        return None
+
+
+def _degraded_result(base: Dict, warning: str) -> Dict:
+    base["degraded"] = True
+    base["warning"] = warning
+    return base
+
+
+# ────────────────────────── 工作规划 ──────────────────────────
+
+def generate_work_plan(input_text: str, tasks: List[Dict] = None, projects: List[Dict] = None,
+                       ai_config=None) -> Dict:
+    api_key, base_url, model = _resolve_config(ai_config)
+    if not api_key:
         return _mock_plan(input_text, tasks, projects)
 
+    content = _call_openai_plan(input_text, tasks, projects, api_key, base_url, model)
+    if content is None:
+        return _degraded_result(
+            _mock_plan(input_text, tasks, projects), "AI 服务调用失败，已降级为本地模板（详见后端日志）"
+        )
 
-def optimize_tasks(tasks: List[Dict]) -> Dict:
-    if settings.openai_api_key:
-        return _call_openai_optimize(tasks)
-    else:
-        return _mock_optimize(tasks)
-
-
-def generate_weekly_report(start_date: str, end_date: str, projects: List[Dict] = None, 
-                           requirements: List[Dict] = None, tasks: List[Dict] = None) -> Dict:
-    if settings.openai_api_key:
-        return _call_openai_weekly_report(start_date, end_date, projects, requirements, tasks)
-    else:
-        return _mock_weekly_report(start_date, end_date, projects, requirements, tasks)
-
-
-def _call_openai_plan(input_text: str, tasks: List[Dict] = None, projects: List[Dict] = None) -> Dict:
-    from openai import OpenAI
-    
-    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_api_base)
-    
-    task_summary = "\n".join([f"- {t['title']} ({t.get('status', 'pending')})" for t in (tasks or [])])
-    project_summary = "\n".join([f"- {p['name']} ({p.get('status', 'active')}, {p.get('progress', 0)}%)" for p in (projects or [])])
-    
-    prompt = f"""
-    作为一名半导体CIM EAP工程师的AI助手，请根据以下信息制定工作规划：
-    
-    用户输入: {input_text}
-    
-    当前任务列表:
-    {task_summary if task_summary else '无'}
-    
-    当前项目列表:
-    {project_summary if project_summary else '无'}
-    
-    请提供：
-    1. 详细的工作规划建议
-    2. 3-5条具体的行动建议
-    """
-    
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "你是一位专业的半导体CIM EAP工程师助手，擅长项目管理、机台维护和工作规划。"},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7
-    )
-    
-    content = response.choices[0].message.content
     suggestions = []
-    
-    lines = content.split('\n')
     suggestion_start = False
-    for line in lines:
+    for line in content.split('\n'):
         if '行动建议' in line or '建议' in line:
             suggestion_start = True
             continue
@@ -73,79 +72,117 @@ def _call_openai_plan(input_text: str, tasks: List[Dict] = None, projects: List[
                 suggestions.append(line.strip()[2:])
             elif line.strip().startswith('*'):
                 suggestions.append(line.strip()[2:])
-    
+
     return {
         "suggestions": suggestions[:5] if suggestions else ["合理规划项目进度", "优先处理高优先级任务", "定期更新机台状态"],
-        "plan": content
+        "plan": content,
     }
 
 
-def _call_openai_optimize(tasks: List[Dict]) -> Dict:
-    from openai import OpenAI
-    
-    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_api_base)
-    
+def _call_openai_plan(input_text, tasks, projects, api_key, base_url, model) -> Optional[str]:
+    task_summary = "\n".join([f"- {t['title']} ({t.get('status', 'pending')})" for t in (tasks or [])])
+    project_summary = "\n".join([f"- {p['name']} ({p.get('status', 'active')}, {p.get('progress', 0)}%)" for p in (projects or [])])
+
+    prompt = f"""
+    作为一名半导体CIM EAP工程师的AI助手，请根据以下信息制定工作规划：
+
+    用户输入: {input_text}
+
+    当前任务列表:
+    {task_summary if task_summary else '无'}
+
+    当前项目列表:
+    {project_summary if project_summary else '无'}
+
+    请提供：
+    1. 详细的工作规划建议
+    2. 3-5条具体的行动建议
+    """
+
+    return _chat(api_key, base_url, model, [
+        {"role": "system", "content": "你是一位专业的半导体CIM EAP工程师助手，擅长项目管理、机台维护和工作规划。"},
+        {"role": "user", "content": prompt}
+    ], temperature=0.7)
+
+
+# ────────────────────────── 任务优化 ──────────────────────────
+
+def optimize_tasks(tasks: List[Dict], ai_config=None) -> Dict:
+    api_key, base_url, model = _resolve_config(ai_config)
+    if not api_key:
+        return _mock_optimize(tasks)
+
     task_summary = json.dumps(tasks, ensure_ascii=False)
-    
+
     prompt = f"""
     作为一名半导体CIM EAP工程师的AI助手，请优化以下任务列表的执行顺序：
-    
+
     当前任务列表:
     {task_summary}
-    
+
     请提供：
     1. 优化后的任务执行顺序
     2. 3-5条优化建议
-    
+
     请以JSON格式返回，包含optimized_tasks和suggestions两个字段。
     """
-    
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "你是一位专业的半导体CIM EAP工程师助手，擅长任务管理和优化。"},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.5
-        )
-        
-        content = response.choices[0].message.content
+
+    content = _chat(api_key, base_url, model, [
+        {"role": "system", "content": "你是一位专业的半导体CIM EAP工程师助手，擅长任务管理和优化。"},
+        {"role": "user", "content": prompt}
+    ], temperature=0.5)
+
+    if content:
         start_idx = content.find('{')
         end_idx = content.rfind('}') + 1
         if start_idx >= 0 and end_idx > start_idx:
-            result = json.loads(content[start_idx:end_idx])
-            return result
-    except Exception:
-        pass
-    
-    return _mock_optimize(tasks)
+            try:
+                return json.loads(content[start_idx:end_idx])
+            except json.JSONDecodeError:
+                logger.warning("AI optimize 返回内容无法解析为 JSON，降级为本地算法")
+
+    return _degraded_result(
+        _mock_optimize(tasks), "AI 服务调用失败或返回格式异常，已降级为本地算法"
+    )
 
 
-def _call_openai_weekly_report(start_date: str, end_date: str, projects: List[Dict] = None,
-                               requirements: List[Dict] = None, tasks: List[Dict] = None) -> Dict:
-    from openai import OpenAI
-    
-    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_api_base)
-    
+# ────────────────────────── 周报 ──────────────────────────
+
+def generate_weekly_report(start_date: str, end_date: str, projects: List[Dict] = None,
+                           requirements: List[Dict] = None, tasks: List[Dict] = None,
+                           ai_config=None) -> Dict:
+    api_key, base_url, model = _resolve_config(ai_config)
+    if not api_key:
+        return _mock_weekly_report(start_date, end_date, projects, requirements, tasks)
+
+    content = _call_openai_weekly_report(start_date, end_date, projects, requirements, tasks, api_key, base_url, model)
+    if content is None:
+        return _degraded_result(
+            _mock_weekly_report(start_date, end_date, projects, requirements, tasks),
+            "AI 服务调用失败，已降级为本地模板（详见后端日志）",
+        )
+    return {"content": content}
+
+
+def _call_openai_weekly_report(start_date, end_date, projects, requirements, tasks, api_key, base_url, model) -> Optional[str]:
     project_summary = "\n".join([f"- {p['name']}: {p.get('progress', 0)}%" for p in (projects or [])])
     req_summary = "\n".join([f"- {r['title']} ({r.get('status', 'pending')})" for r in (requirements or [])])
     task_summary = "\n".join([f"- {t['title']} ({t.get('status', 'pending')})" for t in (tasks or [])])
-    
+
     prompt = f"""
     作为一名半导体CIM EAP工程师的AI助手，请根据以下信息生成周报：
-    
+
     时间范围: {start_date} 至 {end_date}
-    
+
     本周项目进展:
     {project_summary if project_summary else '无'}
-    
+
     需求处理情况:
     {req_summary if req_summary else '无'}
-    
+
     任务完成情况:
     {task_summary if task_summary else '无'}
-    
+
     请按照以下格式生成专业的周报：
     1. 本周工作概述
     2. 项目进展详情
@@ -154,20 +191,78 @@ def _call_openai_weekly_report(start_date: str, end_date: str, projects: List[Di
     5. 下周工作计划
     6. 问题与建议
     """
-    
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "你是一位专业的半导体CIM EAP工程师助手，擅长撰写专业的工作周报。"},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.6
-    )
-    
+
+    return _chat(api_key, base_url, model, [
+        {"role": "system", "content": "你是一位专业的半导体CIM EAP工程师助手，擅长撰写专业的工作周报。"},
+        {"role": "user", "content": prompt}
+    ], temperature=0.6)
+
+
+# ────────────────────────── 每日站会 ──────────────────────────
+
+def generate_daily_standup(work_items: List[Dict] = None, target_date: str = None,
+                           ai_config=None) -> Dict:
+    api_key, base_url, model = _resolve_config(ai_config)
+    if not api_key:
+        return _mock_standup(work_items, target_date)
+
+    content = _call_openai_standup(work_items, target_date, api_key, base_url, model)
+    if content is None:
+        return _degraded_result(
+            _mock_standup(work_items, target_date), "AI 服务调用失败，已降级为本地模板（详见后端日志）"
+        )
+
+    suggestions = [line.strip('-* ').strip() for line in content.split('\n') if line.strip().startswith(('-', '*'))]
+    pending = [w for w in (work_items or []) if w.get('status') != 'completed']
+    overdue = _overdue_items(work_items, target_date)
+
     return {
-        "content": response.choices[0].message.content
+        "today_tasks": pending[:5],
+        "overdue_tasks": overdue,
+        "suggestions": suggestions[:5] if suggestions else [
+            "优先处理高优先级任务",
+            "合理安排时间，避免任务堆积",
+            "及时更新任务状态"
+        ],
+        "summary": content
     }
 
+
+def _call_openai_standup(work_items, target_date, api_key, base_url, model) -> Optional[str]:
+    today = target_date or date.today().isoformat()
+    pending = [w for w in (work_items or []) if w.get('status') != 'completed']
+    completed = [w for w in (work_items or []) if w.get('status') == 'completed']
+    overdue = _overdue_items(work_items, target_date)
+
+    prompt = f"""
+作为AI工作助手，请为工程师生成今日工作简报。
+
+日期: {today}
+待处理工作项 ({len(pending)} 项):
+{chr(10).join([f"- {w.get('title')} [优先级:{w.get('priority_score',0):.1f}]" for w in pending[:10]])}
+
+已完成 ({len(completed)} 项)
+逾期 ({len(overdue)} 项)
+
+请生成：
+1. 3条今日待办建议（按优先级）
+2. 1句鼓励的话
+3. 1条改进建议
+"""
+
+    return _chat(api_key, base_url, model, [
+        {"role": "system", "content": "你是一位专业的工作效率助手，擅长帮助工程师规划每日工作。"},
+        {"role": "user", "content": prompt}
+    ], temperature=0.7)
+
+
+def _overdue_items(work_items: List[Dict] = None, target_date: str = None) -> List[Dict]:
+    today = target_date or date.today().isoformat()
+    return [w for w in (work_items or [])
+            if w.get('status') != 'completed' and w.get('due_date') and w.get('due_date') < today]
+
+
+# ────────────────────────── 本地算法（无需 AI）──────────────────────────
 
 def _mock_plan(input_text: str, tasks: List[Dict] = None, projects: List[Dict] = None) -> Dict:
     return {
@@ -200,7 +295,7 @@ def _mock_plan(input_text: str, tasks: List[Dict] = None, projects: List[Dict] =
 
 def _mock_optimize(tasks: List[Dict]) -> Dict:
     prioritized = sorted(tasks, key=lambda x: {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}.get(x.get('priority', 'medium'), 2))
-    
+
     return {
         "optimized_tasks": prioritized,
         "suggestions": [
@@ -240,13 +335,6 @@ def _mock_weekly_report(start_date: str, end_date: str, projects: List[Dict] = N
 暂无重大问题，建议继续保持良好的工作节奏。
 """
     }
-
-
-def generate_daily_standup(work_items: List[Dict] = None, target_date: str = None) -> Dict:
-    if settings.openai_api_key:
-        return _call_openai_standup(work_items, target_date)
-    else:
-        return _mock_standup(work_items, target_date)
 
 
 def smart_sort_work_items(work_items: List[Dict], strategy: str = "priority") -> Dict:
@@ -335,60 +423,11 @@ def check_reminders(work_items: List[Dict] = None, target_date: str = None) -> D
     }
 
 
-def _call_openai_standup(work_items: List[Dict] = None, target_date: str = None) -> Dict:
-    from openai import OpenAI
-    client = OpenAI(api_key=settings.openai_api_key, base_url=settings.openai_api_base)
-
-    today = target_date or date.today().isoformat()
-    pending = [w for w in (work_items or []) if w.get('status') != 'completed']
-    completed = [w for w in (work_items or []) if w.get('status') == 'completed']
-    overdue = [w for w in pending if w.get('due_date') and w.get('due_date') < today]
-
-    prompt = f"""
-作为AI工作助手，请为工程师生成今日工作简报。
-
-日期: {today}
-待处理工作项 ({len(pending)} 项):
-{chr(10).join([f"- {w.get('title')} [优先级:{w.get('priority_score',0):.1f}]" for w in pending[:10]])}
-
-已完成 ({len(completed)} 项)
-逾期 ({len(overdue)} 项)
-
-请生成：
-1. 3条今日待办建议（按优先级）
-2. 1句鼓励的话
-3. 1条改进建议
-"""
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "你是一位专业的工作效率助手，擅长帮助工程师规划每日工作。"},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.7
-    )
-
-    content = response.choices[0].message.content
-    suggestions = [line.strip('-* ').strip() for line in content.split('\n') if line.strip().startswith(('-', '*'))]
-
-    return {
-        "today_tasks": pending[:5],
-        "overdue_tasks": overdue,
-        "suggestions": suggestions[:5] if suggestions else [
-            "优先处理高优先级任务",
-            "合理安排时间，避免任务堆积",
-            "及时更新任务状态"
-        ],
-        "summary": content
-    }
-
-
 def _mock_standup(work_items: List[Dict] = None, target_date: str = None) -> Dict:
     today = target_date or date.today().isoformat()
     pending = [w for w in (work_items or []) if w.get('status') != 'completed']
     completed = [w for w in (work_items or []) if w.get('status') == 'completed']
-    overdue = [w for w in pending if w.get('due_date') and w.get('due_date') < today]
+    overdue = _overdue_items(work_items, target_date)
 
     high_priority = sorted(
         [w for w in pending if w.get('priority_score', 0) >= 7],

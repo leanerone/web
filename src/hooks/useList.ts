@@ -25,12 +25,16 @@ export function useList<T, P extends Record<string, unknown>>(
   const [loading, setLoading] = useState(true);
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
+  // 竞态守卫：快速连发请求时，只让最后一次的响应生效
+  const reqIdRef = useRef(0);
   const paramsKey = JSON.stringify(params);
 
   const refresh = useCallback(async () => {
+    const reqId = ++reqIdRef.current;
     setLoading(true);
     try {
       const res = await fetcherRef.current(JSON.parse(paramsKey) as P);
+      if (reqId !== reqIdRef.current) return; // 已有更新的请求，丢弃过期响应
       if (res.success) {
         setData(res.data);
         setTotal(res.total ?? res.data.length);
@@ -38,9 +42,10 @@ export function useList<T, P extends Record<string, unknown>>(
         toast.error(res.message || '列表加载失败');
       }
     } catch {
+      if (reqId !== reqIdRef.current) return;
       toast.error('列表加载失败，请检查后端服务');
     } finally {
-      setLoading(false);
+      if (reqId === reqIdRef.current) setLoading(false);
     }
   }, [paramsKey]);
 

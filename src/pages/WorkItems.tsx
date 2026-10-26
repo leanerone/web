@@ -27,6 +27,7 @@ import { confirmAction } from '@/components/ui/ConfirmDialog';
 import { level, taskStatus, priorityScoreStyle } from '@/constants/status';
 import { useClickOutside } from '@/hooks/useClickOutside';
 import { useDebouncedValue } from '@/hooks/useList';
+import { todayLocal } from '@/lib/utils';
 import { aiAPI, workItemsAPI } from '@/services/api';
 import type { WorkCategory, WorkItem, CreateWorkItemRequest } from '@/types';
 
@@ -212,7 +213,7 @@ export default function WorkItems() {
     }
   };
 
-  const handleImportTable = async (tableText: string) => {
+  const handleImportTable = async (tableText: string): Promise<boolean> => {
     try {
       const res = await workItemsAPI.importTable(tableText);
       if (res.success) {
@@ -220,11 +221,14 @@ export default function WorkItems() {
         setIsImportModalOpen(false);
         toast.success(`成功导入 ${res.data.count} 个工作项`);
         fetchWorkItems();
+        return true;
       } else {
         toast.error(res.message || '导入失败');
+        return false;
       }
     } catch {
       toast.error('导入失败，请检查表格格式');
+      return false;
     }
   };
 
@@ -515,7 +519,7 @@ function WorkItemRow({
 }) {
   const done = item.status === 'completed';
   const score = priorityScoreStyle(item.priority_score);
-  const overdue = item.due_date && item.due_date < new Date().toISOString().split('T')[0] && !done;
+  const overdue = item.due_date && item.due_date < todayLocal() && !done;
 
   return (
     <li className="group flex items-center gap-3 px-4 py-3 transition-colors hover:bg-gray-50">
@@ -720,7 +724,7 @@ function WorkItemModal({ isOpen, onClose, categories, item, onSubmit }: WorkItem
 interface ImportTableModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImport: (tableText: string) => void;
+  onImport: (tableText: string) => Promise<boolean>;
   importedCount: number | null;
 }
 
@@ -728,15 +732,19 @@ function ImportTableModal({ isOpen, onClose, onImport, importedCount }: ImportTa
   const [tableText, setTableText] = useState('');
   const [isImporting, setIsImporting] = useState(false);
 
-  const handleImport = () => {
+  const handleImport = async () => {
     if (!tableText.trim()) {
       toast.error('请粘贴表格内容');
       return;
     }
     setIsImporting(true);
-    onImport(tableText);
-    setIsImporting(false);
-    setTableText('');
+    try {
+      const ok = await onImport(tableText);
+      // 导入成功才清空输入，失败时保留内容供用户修正
+      if (ok) setTableText('');
+    } finally {
+      setIsImporting(false);
+    }
   };
 
   return (

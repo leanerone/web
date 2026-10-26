@@ -62,8 +62,8 @@ def list_work_items(
     urgency: str = Query(None),
     importance: str = Query(None),
     sort_by: str = Query("priority_score"),
-    limit: int = Query(100),
-    offset: int = Query(0),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     keyword: str = Query(None, description="按标题/详情模糊搜索"),
     db: Session = Depends(get_db)
 ):
@@ -136,26 +136,30 @@ def save_daily_plan_api(data: DailyPlanCreate, db: Session = Depends(get_db)):
 
 @router.get("/stats")
 def get_work_stats(db: Session = Depends(get_db)):
+    from sqlalchemy import func
+
     total = db.query(WorkItem).count()
     pending = db.query(WorkItem).filter(WorkItem.status == "pending").count()
     in_progress = db.query(WorkItem).filter(WorkItem.status == "in_progress").count()
     completed = db.query(WorkItem).filter(WorkItem.status == "completed").count()
     blocked = db.query(WorkItem).filter(WorkItem.status == "blocked").count()
-    
+
     urgent_count = db.query(WorkItem).filter(WorkItem.urgency == "high").count()
     important_count = db.query(WorkItem).filter(WorkItem.importance == "high").count()
-    
-    categories = db.query(WorkCategory).all()
+
+    # 一条 GROUP BY 聚合替代逐类别 count 的 N+1 查询
+    category_counts = dict(
+        db.query(WorkItem.category_id, func.count(WorkItem.id)).group_by(WorkItem.category_id).all()
+    )
     category_stats = []
-    for cat in categories:
-        count = db.query(WorkItem).filter(WorkItem.category_id == cat.id).count()
+    for cat in db.query(WorkCategory).all():
         category_stats.append({
             "id": cat.id,
             "name": cat.name,
             "code": cat.code,
             "icon": cat.icon,
             "color": cat.color,
-            "count": count
+            "count": category_counts.get(cat.id, 0)
         })
     
     return {

@@ -23,7 +23,7 @@ import { toast } from '@/components/ui/Toast';
 import { useNavigate } from 'react-router-dom';
 import { useList, useDebouncedValue } from '@/hooks/useList';
 import { equipmentAPI, settingsAPI } from '@/services/api';
-import useAppStore from '@/stores/appStore';
+import { todayLocal } from '@/lib/utils';
 import type { Equipment } from '@/types';
 
 const inputCls =
@@ -58,7 +58,6 @@ function buildGitSourceKey(item: Equipment): string {
 
 export default function Equipment() {
   const navigate = useNavigate();
-  const { setEquipment } = useAppStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -83,9 +82,10 @@ export default function Equipment() {
         equipmentAPI.list({ page: 1, limit: 10000 }),
         settingsAPI.list('equipment').catch(() => ({ success: false, data: [] as { key: string; value: string }[] })),
       ]);
+      // 只用于本地统计条/类型下拉，不再写入全局 appStore
+      //（Requirements 页自行拉取所需数据，几千行进 store 会拖累所有订阅组件）
       if (eqRes.success) {
         setStatsData(eqRes.data);
-        setEquipment(eqRes.data);
       }
       if (setRes.success && Array.isArray(setRes.data)) {
         const baseRow = setRes.data.find((s) => s.key === 'git_source_base_url');
@@ -98,7 +98,7 @@ export default function Equipment() {
     } catch {
       toast.error('机台统计加载失败，量产环境需配置 PANJOB 数据库连接');
     }
-  }, [setEquipment]);
+  }, []);
 
   useEffect(() => {
     fetchMeta();
@@ -151,7 +151,7 @@ export default function Equipment() {
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `equipment_list_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `equipment_list_${todayLocal()}.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
     toast.success('已导出 CSV');
@@ -433,23 +433,40 @@ export default function Equipment() {
             <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
               上一页
             </Button>
-            {Array.from({ length: totalPages }).slice(0, 10).map((_, i) => {
-              const p = i + 1;
-              return (
-                <button
-                  key={p}
-                  onClick={() => setPage(p)}
-                  className={`h-7 min-w-7 rounded-md px-1.5 text-xs tabular-nums transition-colors ${
-                    p === page
-                      ? 'bg-accent-600 font-medium text-white'
-                      : 'text-gray-500 hover:bg-gray-100'
-                  }`}
-                >
-                  {p}
-                </button>
+            {/* 以当前页为中心的滑动窗口，总数超过窗口宽度时两端显示省略号 */}
+            {(() => {
+              const windowSize = 9;
+              let start = Math.max(1, page - Math.floor(windowSize / 2));
+              const end = Math.min(totalPages, start + windowSize - 1);
+              start = Math.max(1, end - windowSize + 1);
+              const pages: Array<number | 'ellipsis'> = [];
+              if (start > 1) {
+                pages.push(1);
+                if (start > 2) pages.push('ellipsis');
+              }
+              for (let p = start; p <= end; p++) pages.push(p);
+              if (end < totalPages) {
+                if (end === totalPages - 1) pages.push(totalPages);
+                else pages.push('ellipsis', totalPages);
+              }
+              return pages.map((p, idx) =>
+                p === 'ellipsis' ? (
+                  <span key={`e${idx}`} className="px-1 text-xs text-gray-300">…</span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className={`h-7 min-w-7 rounded-md px-1.5 text-xs tabular-nums transition-colors ${
+                      p === page
+                        ? 'bg-accent-600 font-medium text-white'
+                        : 'text-gray-500 hover:bg-gray-100'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                )
               );
-            })}
-            {totalPages > 10 && <span className="px-1 text-xs text-gray-300">…</span>}
+            })()}
             <Button variant="secondary" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
               下一页
             </Button>

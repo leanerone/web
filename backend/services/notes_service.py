@@ -104,7 +104,8 @@ def _sync_from_notes_server(db: Session):
     try:
         response = requests.get(
             f"{settings.notes_server_url}/api/documents",
-            auth=(settings.notes_user, settings.notes_password)
+            auth=(settings.notes_user, settings.notes_password),
+            timeout=(5, 30),
         )
         response.raise_for_status()
         documents = response.json()
@@ -167,7 +168,7 @@ def _import_from_notes_server(db: Session, request: NotesImportRequest):
     
     try:
         url = f"{settings.notes_server_url}/api/documents/{request.notes_id}" if request.notes_id else f"{settings.notes_server_url}/api/documents"
-        response = requests.get(url, auth=(settings.notes_user, settings.notes_password))
+        response = requests.get(url, auth=(settings.notes_user, settings.notes_password), timeout=(5, 30))
         response.raise_for_status()
         docs = response.json()
         

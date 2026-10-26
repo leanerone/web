@@ -1,27 +1,68 @@
-"""Windows认证服务
+"""认证服务
 
-通过读取当前进程的Windows登录用户信息实现SSO（单点登录）。
-适用于企业内网环境，后端服务运行在用户所在的Windows域中。
+- JWT 签发与校验：密钥从 config.Settings 读取，未配置时生成临时密钥（重启即失效）
+- 密码哈希：PBKDF2-SHA256（标准库实现，无额外依赖）
+- Windows SSO：读取后端进程的登录用户（内网演示用途；真正的域认证应接入
+  Kerberos/SPNEGO 或由反向代理传入 REMOTE_USER）
 """
 import os
 import getpass
 import socket
 import time
-import jwt
+import hashlib
+import logging
+import secrets
 from typing import Optional
 
+from config.settings import settings
 
-# 简单的用户数据库（实际应接入LDAP/AD）
-# 这里列出常见的企业域用户角色
+logger = logging.getLogger("cim.auth")
+
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_HOURS = settings.jwt_expire_hours
+
+# 简单的用户信息表（角色/部门展示用；账号密码以 users 表为准）
 KNOWN_USERS = {
     "administrator": {"name": "管理员", "role": "admin", "department": "IT", "team": "CIM"},
     "eap.engineer": {"name": "EAP工程师", "role": "engineer", "department": "制造", "team": "EAP"},
     "cim.user": {"name": "CIM用户", "role": "user", "department": "制造", "team": "CIM"},
 }
 
-JWT_SECRET = "cim-work-manager-secret-key-2026"
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_HOURS = 8
+if settings.jwt_secret:
+    JWT_SECRET = settings.jwt_secret
+else:
+    # 绝不把固定字符串硬编码进源码；临时密钥仅保证本次进程内 token 可用
+    JWT_SECRET = secrets.token_hex(32)
+    logger.warning(
+        "未配置 JWT_SECRET，已生成临时密钥：服务重启后所有已发放 token 失效。"
+        "生产环境请在 backend/.env 中设置 JWT_SECRET"
+    )
+
+
+# ── 密码哈希（PBKDF2-SHA256，格式: pbkdf2_sha256$<salt>$<digest>）──
+
+_PBKDF2_ITERATIONS = 100_000
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), _PBKDF2_ITERATIONS
+    ).hex()
+    return f"pbkdf2_sha256${salt}${digest}"
+
+
+def verify_password(password: str, stored: Optional[str]) -> bool:
+    if not stored:
+        return False
+    try:
+        _algo, salt, digest = stored.split("$")
+    except ValueError:
+        return False
+    calc = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), _PBKDF2_ITERATIONS
+    ).hex()
+    return secrets.compare_digest(calc, digest)
 
 
 def get_current_windows_user() -> dict:
@@ -72,11 +113,23 @@ def generate_token(user: dict) -> str:
         "iat": int(time.time()),
         "exp": int(time.time()) + JWT_EXPIRE_HOURS * 3600,
     }
+    return jwt_encode(payload)
+
+
+def token_expires_at(payload: dict) -> str:
+    """从 token payload 反解过期时间，避免与 JWT_EXPIRE_HOURS 两处魔数不同步"""
+    exp = payload.get("exp")
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(exp or time.time()))
+
+
+def jwt_encode(payload: dict) -> str:
+    import jwt
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
 def verify_token(token: str) -> Optional[dict]:
     """验证JWT token"""
+    import jwt
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         return payload

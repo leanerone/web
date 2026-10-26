@@ -21,9 +21,12 @@ def create_task(db: Session, task: TaskCreate):
         due_date=task.due_date,
     )
     db.add(db_task)
+    db.flush()  # autoflush 让进度重算看到新任务
+    update_project_progress(db, task.project_id)
+    # 单次 commit：commit 会 expire 会话内实例，若 refresh 之后再 commit，
+    # 返回对象会被序列化成 {}
     db.commit()
     db.refresh(db_task)
-    update_project_progress(db, task.project_id)
     return db_task
 
 
@@ -41,9 +44,9 @@ def update_task(db: Session, task_id: int, task: TaskUpdate):
         db_task.priority = TaskPriority(task.priority)
     if task.due_date is not None:
         db_task.due_date = task.due_date
+    update_project_progress(db, db_task.project_id)
     db.commit()
     db.refresh(db_task)
-    update_project_progress(db, db_task.project_id)
     return db_task
 
 
@@ -53,6 +56,6 @@ def delete_task(db: Session, task_id: int):
         return False
     project_id = db_task.project_id
     db.delete(db_task)
-    db.commit()
     update_project_progress(db, project_id)
+    db.commit()
     return True

@@ -109,9 +109,12 @@ def create_work_item(db: Session, data: WorkItemCreate):
     item = WorkItem(**data.model_dump())
     item.priority_score = calculate_priority(item.urgency, item.importance)
     db.add(item)
+    db.flush()  # 先拿到 id 供审计日志使用
+    _create_log(db, item.id, "create", f"创建工作项: {item.title}")
+    # 单次 commit：commit 会 expire 会话内所有实例，若在 refresh 之后再 commit，
+    # 返回的对象会被序列化成 {}
     db.commit()
     db.refresh(item)
-    _create_log(db, item.id, "create", f"创建工作项: {item.title}")
     return item
 
 
@@ -124,12 +127,12 @@ def update_work_item(db: Session, item_id: int, data: WorkItemUpdate):
     for key, value in update_data.items():
         setattr(item, key, value)
     item.priority_score = calculate_priority(item.urgency, item.importance)
-    db.commit()
-    db.refresh(item)
     if "status" in update_data and update_data["status"] != old_status:
         _create_log(db, item_id, "status", f"状态变更: {old_status} → {item.status}")
     else:
         _create_log(db, item_id, "update", f"更新工作项: {item.title}")
+    db.commit()
+    db.refresh(item)
     return item
 
 
@@ -138,7 +141,7 @@ def delete_work_item(db: Session, item_id: int):
     if not item:
         return False
     title = item.title
-    # 归档日志不带 item 外键（避免删除父行后违反外键约束），仅作审计流水
+    # 归档日志不带 item 外键（删除父行后由 FK CASCADE 清掉关联日志），仅作审计流水
     _create_log(db, None, "delete", f"删除工作项 #{item_id}: {title}")
     db.delete(item)
     db.commit()
@@ -234,13 +237,13 @@ def get_work_logs(db: Session, work_item_id: int = None):
 
 
 def _create_log(db: Session, work_item_id: int | None, action: str, description: str):
+    """只 add 不 commit——由调用方在同一事务内统一提交"""
     log = WorkLog(
         work_item_id=work_item_id,
         action=action,
         description=description
     )
     db.add(log)
-    db.commit()
     return log
 
 

@@ -26,9 +26,11 @@ def create_project(db: Session, project: ProjectCreate):
         end_date=project.end_date,
     )
     db.add(db_project)
+    db.flush()
+    update_project_progress(db, db_project.id)
+    # 单次 commit + refresh，避免 commit 过期已返回对象导致响应体为空
     db.commit()
     db.refresh(db_project)
-    update_project_progress(db, db_project.id)
     return db_project
 
 
@@ -63,6 +65,7 @@ def delete_project(db: Session, project_id: int):
 
 
 def update_project_progress(db: Session, project_id: int):
+    """按任务完成度重算项目进度。只写不 commit，由调用方在同一事务内提交"""
     project = get_project(db, project_id)
     if not project:
         return
@@ -72,4 +75,3 @@ def update_project_progress(db: Session, project_id: int):
         project.progress = round((completed_tasks / total_tasks) * 100, 2)
     else:
         project.progress = 0.0
-    db.commit()

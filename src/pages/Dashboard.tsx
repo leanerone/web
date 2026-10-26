@@ -25,6 +25,7 @@ import { StatsSkeleton, Skeleton } from '@/components/ui/Skeleton';
 import { toast } from '@/components/ui/Toast';
 import { priorityScoreStyle } from '@/constants/status';
 import { dashboardAPI, projectAPI, requirementAPI, workItemsAPI } from '@/services/api';
+import { todayLocal } from '@/lib/utils';
 import type { DashboardStats, Project, Requirement, WorkStats, WorkItem } from '@/types';
 
 const REFRESH_INTERVAL = 60_000;
@@ -69,9 +70,26 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchData();
-    const timer = setInterval(() => fetchData(true), REFRESH_INTERVAL);
+    const timer = setInterval(() => {
+      // 后台标签页不轮询，回到前台时下一轮会自动补上
+      if (!document.hidden) fetchData(true);
+    }, REFRESH_INTERVAL);
     return () => clearInterval(timer);
   }, [fetchData]);
+
+  /** 勾选待办后只静默刷新统计数字，不重拉项目/需求/待办全量列表 */
+  const refreshStatsQuiet = useCallback(async () => {
+    try {
+      const [statsRes, workStatsRes] = await Promise.allSettled([
+        dashboardAPI.stats(),
+        workItemsAPI.getStats(),
+      ]);
+      if (statsRes.status === 'fulfilled' && statsRes.value.success) setStats(statsRes.value.data);
+      if (workStatsRes.status === 'fulfilled' && workStatsRes.value.success) setWorkStats(workStatsRes.value.data);
+    } catch {
+      // 静默失败，60 秒后的整轮刷新会纠正
+    }
+  }, []);
 
   /** 真实勾选完成/恢复 */
   const toggleItem = async (item: WorkItem) => {
@@ -84,7 +102,7 @@ export default function Dashboard() {
           nextStatus === 'completed' ? prev.filter((i) => i.id !== item.id) : prev.map((i) => (i.id === item.id ? res.data : i))
         );
         toast.success(nextStatus === 'completed' ? '已完成，干得漂亮' : '已恢复为待处理');
-        if (nextStatus === 'completed') fetchData(true);
+        refreshStatsQuiet();
       } else {
         toast.error(res.message || '状态更新失败');
       }
@@ -100,7 +118,7 @@ export default function Dashboard() {
   const pendingRequirements = requirements.filter((r) => r.status !== 'completed');
   const activeProjects = projects.filter((p) => p.status === 'active');
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayLocal();
   const dueSoon = openItems
     .filter((i) => i.due_date)
     .sort((a, b) => (a.due_date || '').localeCompare(b.due_date || ''))

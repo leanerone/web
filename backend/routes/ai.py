@@ -5,6 +5,7 @@ from services.ai_service import (
     generate_work_plan, optimize_tasks, generate_weekly_report,
     generate_daily_standup, smart_sort_work_items, check_reminders
 )
+from services.setting_service import get_ai_settings
 from schemas.ai import (
     AIPlanRequest, AIPlanResponse, AIOptimizeRequest, AIOptimizeResponse,
     AIWeeklyReportRequest, AIWeeklyReportResponse,
@@ -17,26 +18,30 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 
 
 @router.post("/plan")
-def ai_plan(request: AIPlanRequest):
-    result = generate_work_plan(request.input, request.tasks, request.projects)
+def ai_plan(request: AIPlanRequest, db: Session = Depends(get_db)):
+    # 设置页保存的配置（DB）优先，.env 兜底
+    result = generate_work_plan(request.input, request.tasks, request.projects, ai_config=get_ai_settings(db))
     return {"success": True, "data": result}
 
 
 @router.post("/optimize")
-def ai_optimize(request: AIOptimizeRequest):
-    result = optimize_tasks(request.tasks)
+def ai_optimize(request: AIOptimizeRequest, db: Session = Depends(get_db)):
+    result = optimize_tasks(request.tasks, ai_config=get_ai_settings(db))
     return {"success": True, "data": result}
 
 
 @router.post("/weekly-report")
-def ai_weekly_report(request: AIWeeklyReportRequest):
-    result = generate_weekly_report(request.start_date, request.end_date, request.projects, request.requirements, request.tasks)
+def ai_weekly_report(request: AIWeeklyReportRequest, db: Session = Depends(get_db)):
+    result = generate_weekly_report(
+        request.start_date, request.end_date, request.projects, request.requirements, request.tasks,
+        ai_config=get_ai_settings(db),
+    )
     return {"success": True, "data": result}
 
 
 @router.post("/daily-standup")
-def ai_daily_standup(request: DailyStandupRequest):
-    result = generate_daily_standup(request.work_items, request.date)
+def ai_daily_standup(request: DailyStandupRequest, db: Session = Depends(get_db)):
+    result = generate_daily_standup(request.work_items, request.date, ai_config=get_ai_settings(db))
     return {"success": True, "data": result}
 
 
